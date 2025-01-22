@@ -3,23 +3,69 @@
 ## Project Overview
 This project is designed to handle web page request simulations and generate responses in the form of Excel files. It processes the downloaded Excel files, performs data manipulation, and integrates with Telegram and other social media platforms to share the processed data.
 
+## Setup Instructions
+
+1. **Clone the repository:**
+   ```sh
+   git clone https://github.com/parmer110/analyze_h_5.git
+   cd m10
+
+## How to Run the Project
+
+1. **Start the Django development server:**
+   ```sh
+   python manage.py runserver
+
+#### Dependencies
+List the main dependencies required for the project.
+
+## Dependencies
+
+- Django
+- pandas
+- openpyxl
+- telethon
+- psycopg2-binary
+
 ## Description
 A brief description of what your project does.
 
-## Installation
-Steps to install dependencies and set up the project.
-
 ## Usage
-Instructions on how to use the project.
+### Authentication
+Authentication
+Login and Store Token:
+
+The LoginViewSetHamkadeh handles user login and stores the authentication token in the session.
+Example:
+class LoginViewSetHamkadeh(viewsets.ViewSet):
+    def create(self, request):
+        # Your existing login logic here
+        token = response.data.get('token')
+        if token:
+            request.session['token'] = token
+        return Response(response.data)
+Retrieve Token in Another View:
+
+You can retrieve the stored token in another class-based view (CBV) using request.session.get('token').
+Example:
+class AnotherViewSet(viewsets.ViewSet):
+    def some_method(self, request):
+        token = request.session.get('token')
+        # Use the token for further processing
 
 ## Contributing
-Guidelines for contributing to the project.
+1. Fork the repository.
+2. Create a new branch (`git checkout -b feature-branch`).
+3. Make your changes.
+4. Commit your changes (`git commit -m 'Add some feature'`).
+5. Push to the branch (`git push origin feature-branch`).
+6. Open a pull request.
 
 ## License
-Information about the project's license.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details..
 
 ## Contact
-How to reach you for questions or support.
+For questions or support, please contact [AliEshraghi](mailto:parmer_110@yahoo.com).
 
 ## Notes
 Hi there.

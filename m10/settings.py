@@ -7,7 +7,7 @@ SECRET_KEY = 'django-insecure-__^&m+j2z20jb9)c@713#-dfd$o$@19rct3pjmm%x8cx0=^(m0
 
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
 
 
 INSTALLED_APPS = [
@@ -17,6 +17,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'rest_framework',
     'web_requests',
     'excel_processing',
     'data_manipulation',
