@@ -1,7 +1,10 @@
 import os
-from django.conf import settings
+import re
 import json
 import requests
+import base64
+from django.conf import settings
+from django.http import FileResponse
 from rest_framework import viewsets
 from rest_framework.response import Response
 from django.http import HttpResponse
@@ -61,7 +64,40 @@ class cm10(viewsets.ViewSet):
             }
             response = requests.post('https://api.hamkadeh.com/api/accounting/call-log/index', headers=headers, params=params)
             
-            response_data = ""
+            content_disposition = response.headers.get('Content-Disposition')
+            shared_dir = '/mnt/shared'
+            if not os.path.exists(shared_dir):
+                os.makedirs(shared_dir)
+
+            if content_disposition:
+                filename = re.findall('filename="(.+)"', content_disposition)
+                if filename:
+                    filename = filename[0]
+                else:
+                    filename = 'response.xlsx'
+            else:
+                filename = 'response.xlsx'
+                            
+            file_path = os.path.join(shared_dir, filename)
+            with open(file_path, 'wb') as f:
+                f.write(response.content)
+
+            if response.headers.get('Content-Type') == 'application/json':
+                try:
+                    response_data = response.json()
+                except json.JSONDecodeError:
+                    response_data = response.text
+            else:
+                response_data = base64.b64encode(response.content).decode('utf-8')
+
+            log = RequestLog.objects.create(
+                username=request.session.get('username'),
+                request_type='POST',
+                request_data=serializer.validated_data,
+                response_data=response_data if response.headers.get('Content-Type') == 'application/json' else None,
+                file_path=file_path if response.headers.get('Content-Type') != 'application/json' else None,
+                additional_info={'status_code': response.status_code}
+            )
 
             if response.headers.get('Content-Type') == 'application/json':
                 try:
@@ -71,59 +107,4 @@ class cm10(viewsets.ViewSet):
             else:
                 return Response(response.text, status=response.status_code)
 
-            log = RequestLog.objects.create(
-                username=request.session.get('username'),
-                request_type='POST',
-                request_data=serializer.validated_data,
-                response_data=response_data,
-                additional_info={'status_code': response.status_code}
-            )
-
-            return Response(response.json())
         return Response(serializer.errors, status=400)
-    
-
-# @csrf_exempt
-# def simulate_request_cm10(request):
-#     try:
-#         body = json.loads(request.body)
-#         start_at = body.get('start_at')
-#         end_at = body.get('end_at')
-#         token = request.headers.get('cookie').split('token=')[1].split(';')[0]
-
-#         # Send the POST request to the target server
-#         url = "https://api.hamkadeh.com/api/accounting/call-log/index"
-#         data = {
-#             'export_data': 1,
-#             'call_type[]': 1,
-#             'start_at': start_at,
-#             'end_at': end_at
-#         }
-#         headers = {
-#             'Authorization': f'Bearer {token}',
-#             'Content-Type': 'application/x-www-form-urlencoded',
-#             'Accept-Encoding': 'br'
-#         }
-#         response = requests.post(url, data=data, headers=headers)
-
-#         # Decode Brotli content if necessary
-#         if response.headers.get('content-encoding') == 'br':
-#             content = brotli.decompress(response.content)
-#         else:
-#             content = response.content
-
-#         # Extract filename from Content-Disposition header
-#         content_disposition = response.headers.get('content-disposition')
-#         if content_disposition:
-#             filename = content_disposition.split('filename=')[1].strip('"')
-#         else:
-#             filename = "data.xlsx"
-
-#         # Return the response as an Excel file
-#         excel_response = HttpResponse(content, content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-#         excel_response['Content-Disposition'] = f'attachment; filename="{filename}"'
-#         return excel_response
-#     except json.JSONDecodeError as e:
-#         return HttpResponse(f"JSON decode error: {e}", status=400)
-#     except Exception as e:
-#         return HttpResponse(f"Error: {e}", status=500)
