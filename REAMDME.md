@@ -107,3 +107,26 @@ Please guide me about overall study and structure, applications creation and all
 - **Modular Design:** Keep each functionality in separate apps for better maintainability.
 - **Documentation:** Document your code and processes thoroughly.
 - **Testing:** Write tests for each functionality to ensure reliability.
+
+## Project Setup
+
+### Windows Version
+- **Dependencies:**
+  - `pywin32`: Provides access to the Excel COM interface for full Excel functionality.
+  - Install with: `pip install pywin32`
+- **Setup:**
+  - Ensure Excel is installed on the server.
+  - Configure Django settings for Windows.
+
+### Linux Version
+- **Dependencies:**
+  - `openpyxl`: For reading/writing Excel files.
+  - `pandas`: For efficient data manipulation.
+  - Install with: `pip install openpyxl pandas`
+- **Setup:**
+  - Ensure all necessary libraries are installed.
+  - Configure Django settings for Linux.
+
+### General Notes
+- Maintain separate branches for Windows and Linux versions.
+- Regularly merge changes from the main branch to keep both versions up-to-date.

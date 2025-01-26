@@ -10,6 +10,10 @@ from rest_framework.response import Response
 from django.http import HttpResponse
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
+from openpyxl import load_workbook
+import xlwings as xw
+import pandas as pd
+from io import BytesIO
 from .serializers import SendCodeSerializer, LoginSerializer, cm10Serializer
 from .models import RequestLog
 
@@ -52,6 +56,8 @@ class cm10(viewsets.ViewSet):
     def create(self, request):
         serializer = cm10Serializer(data=request.data)
         if serializer.is_valid():
+
+            # Initialization
             token = request.session.get('token')
             headers = {
                 'Authorization': f'Bearer {token}'
@@ -62,10 +68,23 @@ class cm10(viewsets.ViewSet):
                 'start_at': serializer.validated_data['start_at'],
                 'end_at': serializer.validated_data['end_at']
             }
-            response = requests.post('https://api.hamkadeh.com/api/accounting/call-log/index', headers=headers, params=params)
-            
-            content_disposition = response.headers.get('Content-Disposition')
             shared_dir = '/mnt/shared'
+
+            # Request simulation core
+            response = requests.post('https://api.hamkadeh.com/api/accounting/call-log/index', headers=headers, params=params)
+            df = pd.read_excel(BytesIO(response.content))
+
+            existing_wb = xw.Book('/mnt/shared/source/میسکال  مشاوران - Main.xlsm')
+            
+            combined_file_path = '/mnt/shared/combined_response.xlsm'
+            existing_wb.save(combined_file_path)
+
+
+
+
+
+            # File exporting
+            content_disposition = response.headers.get('Content-Disposition')
             if not os.path.exists(shared_dir):
                 os.makedirs(shared_dir)
 
@@ -90,6 +109,7 @@ class cm10(viewsets.ViewSet):
             else:
                 response_data = base64.b64encode(response.content).decode('utf-8')
 
+            # request simulation logging
             log = RequestLog.objects.create(
                 username=request.session.get('username'),
                 request_type='POST',
@@ -99,6 +119,7 @@ class cm10(viewsets.ViewSet):
                 additional_info={'status_code': response.status_code}
             )
 
+            # Django response
             if response.headers.get('Content-Type') == 'application/json':
                 try:
                     return Response(response.json())
