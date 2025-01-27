@@ -61,7 +61,7 @@ DATABASES = {
         'NAME': 'analyzeunit',
         'USER': 'parmer_110',
         'PASSWORD': 'Aa4812@',
-        'HOST': 'localhost',
+        'HOST': '192.168.134.44',
         'PORT': '5432',
     }
 }
@@ -91,6 +91,7 @@ USE_I18N = True
 
 USE_TZ = True
 
+APPEND_SLASH = False
 
 STATIC_URL = 'static/'
 

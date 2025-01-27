@@ -3,6 +3,7 @@ import re
 import json
 import requests
 import base64
+import jdatetime
 from django.conf import settings
 from django.http import FileResponse
 from rest_framework import viewsets
@@ -10,7 +11,7 @@ from rest_framework.response import Response
 from django.http import HttpResponse
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from openpyxl import load_workbook
+import openpyxl
 import xlwings as xw
 import pandas as pd
 from io import BytesIO
@@ -58,6 +59,12 @@ class cm10(viewsets.ViewSet):
         if serializer.is_valid():
 
             # Initialization
+            shared_dir = r'C:\Users\eshraghi\Documents\esh\share\cm10\temp'
+            calc_file_path = r'C:\Users\eshraghi\Documents\esh\share\cm10\source\میسکال  مشاوران - Main.xlsm'
+
+            now = jdatetime.datetime.now()
+            formatted_date = now.strftime('%Y_%m_%d_%H_%M_%S')
+
             token = request.session.get('token')
             headers = {
                 'Authorization': f'Bearer {token}'
@@ -68,38 +75,69 @@ class cm10(viewsets.ViewSet):
                 'start_at': serializer.validated_data['start_at'],
                 'end_at': serializer.validated_data['end_at']
             }
-            shared_dir = '/mnt/shared'
-
+            
+            ########################################################
+            ########################################################
+            # Export data file preparation
             # Request simulation core
             response = requests.post('https://api.hamkadeh.com/api/accounting/call-log/index', headers=headers, params=params)
-            df = pd.read_excel(BytesIO(response.content))
 
-            existing_wb = xw.Book('/mnt/shared/source/میسکال  مشاوران - Main.xlsm')
-            
-            combined_file_path = '/mnt/shared/combined_response.xlsm'
-            existing_wb.save(combined_file_path)
-
-
-
-
-
-            # File exporting
+            # Getting file name
             content_disposition = response.headers.get('Content-Disposition')
+
             if not os.path.exists(shared_dir):
                 os.makedirs(shared_dir)
 
             if content_disposition:
-                filename = re.findall('filename="(.+)"', content_disposition)
+                filename = re.findall('filename=(.+)', content_disposition)
                 if filename:
                     filename = filename[0]
+                    filename = f"{filename}_{formatted_date}.xlsx"
                 else:
-                    filename = 'response.xlsx'
+                    filename = f"{formatted_date}_response.xlsx"
             else:
-                filename = 'response.xlsx'
-                            
+                filename = f"{formatted_date}_response.xlsx"
+
+            # Save exported file 
             file_path = os.path.join(shared_dir, filename)
             with open(file_path, 'wb') as f:
                 f.write(response.content)
+
+            
+            ########################################################
+            ########################################################
+            # Calculation source loading & manipulation
+            workbook = openpyxl.load_workbook(calc_file_path, keep_vba=True)
+
+            # Access the sheets
+            sheet1 = workbook['comand_center kol']
+            sheet2 = workbook['comand_center-10min']
+            sheet3 = workbook['Tamas_kol']
+
+            # Perform the manipulations
+            sheet1['B3'] = 14031026
+            sheet1['B4'] = 14031026
+            sheet1['B5'] = '12:00'
+            sheet1['B6'] = '12:10'
+            sheet2['B3'] = 14031026
+            sheet2['B4'] = 14031026
+            sheet2['B5'] = '00:00'
+            sheet2['B6'] = '12:00'
+
+            # Delete range A:M in Tamas_kol
+            for row in sheet3.iter_rows(min_col=1, max_col=13):
+                for cell in row:
+                    cell.value = None
+
+            # Extend formulas in range N:AM
+            for row in sheet3.iter_rows(min_col=14, max_col=39):
+                for cell in row:
+                    # Assuming you want to copy formulas from A:M to N:AM
+                    base_cell = sheet3.cell(row=cell.row, column=cell.column - 13)
+                    cell.value = base_cell.value
+
+            # Save the workbook
+            workbook.save(r'C:\Users\eshraghi\Documents\esh\share\cm10\result.xlsm')
 
             if response.headers.get('Content-Type') == 'application/json':
                 try:
