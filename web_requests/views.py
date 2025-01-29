@@ -57,8 +57,9 @@ class cm10(viewsets.ViewSet):
     def create(self, request):
         serializer = cm10Serializer(data=request.data)
         if serializer.is_valid():
-
-            # Initialization
+            
+            ########################################################
+            #region Initialization
             shared_dir = r'C:\Users\eshraghi\Documents\esh\share\cm10\temp'
             calc_file_path = r'C:\Users\eshraghi\Documents\esh\share\cm10\source\میسکال  مشاوران - Main.xlsm'
 
@@ -75,13 +76,72 @@ class cm10(viewsets.ViewSet):
                 'start_at': serializer.validated_data['start_at'],
                 'end_at': serializer.validated_data['end_at']
             }
-            
+            #endregion Initialization
+
+
             ########################################################
-            ########################################################
-            # Export data file preparation
+            #region Preparing Excel files
+            # Downloading source Excel file
             # Request simulation core
             response = requests.post('https://api.hamkadeh.com/api/accounting/call-log/index', headers=headers, params=params)
 
+            downloaded_workbook = openpyxl.load_workbook(BytesIO(response.content))
+
+            downloaded_sheet1 = downloaded_workbook['Sheet1']
+            
+            max_row = downloaded_sheet1.max_row
+            max_col = 13
+            
+            # Uploading reference Excel file + manipulation and merge before
+            workbook = openpyxl.load_workbook(calc_file_path, keep_vba=True)
+            #endregion Preparing Excel files
+
+
+            ########################################################
+            # region Manipulation, Mixing, Calculate
+            # Access the sheets
+            sheet1 = workbook['comand_center kol']
+            sheet2 = workbook['comand_center-10min']
+            sheet3 = workbook['Tamas_kol']
+
+            # Perform the manipulations
+            sheet1['B3'] = 14031026
+            sheet1['B4'] = 14031026
+            sheet1['B5'] = '12:00'
+            sheet1['B6'] = '12:10'
+            sheet2['B3'] = 14031026
+            sheet2['B4'] = 14031026
+            sheet2['B5'] = '00:00'
+            sheet2['B6'] = '12:00'
+
+            # Delete range A:M in Tamas_kol
+            for row in sheet3.iter_rows(min_col=1, max_col=13):
+                for cell in row:
+                    cell.value = None
+
+            # Copy data to Tamas_kol
+            for row in range(1, max_row + 1):
+                for col in range(1, max_col + 1):
+                    cell_value = downloaded_sheet1.cell(row=row, column=col).value
+                    sheet3.cell(row=row, column=col).value = cell_value
+
+            # Extend formulas in range N:AM
+            for row in range(1, max_row + 1):
+                for col in range(14, 40):  # Columns N to AM
+                    formula_cell = sheet3.cell(row=row, column=col)
+                    base_formula = formula_cell.value
+                    formula_cell.value = base_formula
+
+            # Clear any extra rows beyond max_row
+            for row in range(max_row + 1, sheet3.max_row + 1):
+                for col in range(14, 40):  # Columns N to AM
+                    sheet3.cell(row=row, column=col).value = None
+            #endregion Manipulation, Mixing, Calculate
+
+
+            ########################################################
+            # Save workbooks
+            # Downloaded
             # Getting file name
             content_disposition = response.headers.get('Content-Disposition')
 
@@ -103,42 +163,13 @@ class cm10(viewsets.ViewSet):
             with open(file_path, 'wb') as f:
                 f.write(response.content)
 
-            
-            ########################################################
-            ########################################################
-            # Calculation source loading & manipulation
-            workbook = openpyxl.load_workbook(calc_file_path, keep_vba=True)
-
-            # Access the sheets
-            sheet1 = workbook['comand_center kol']
-            sheet2 = workbook['comand_center-10min']
-            sheet3 = workbook['Tamas_kol']
-
-            # Perform the manipulations
-            sheet1['B3'] = 14031026
-            sheet1['B4'] = 14031026
-            sheet1['B5'] = '12:00'
-            sheet1['B6'] = '12:10'
-            sheet2['B3'] = 14031026
-            sheet2['B4'] = 14031026
-            sheet2['B5'] = '00:00'
-            sheet2['B6'] = '12:00'
-
-            # Delete range A:M in Tamas_kol
-            for row in sheet3.iter_rows(min_col=1, max_col=13):
-                for cell in row:
-                    cell.value = None
-
-            # Extend formulas in range N:AM
-            for row in sheet3.iter_rows(min_col=14, max_col=39):
-                for cell in row:
-                    # Assuming you want to copy formulas from A:M to N:AM
-                    base_cell = sheet3.cell(row=cell.row, column=cell.column - 13)
-                    cell.value = base_cell.value
-
-            # Save the workbook
+            # Reference (formulas)
             workbook.save(r'C:\Users\eshraghi\Documents\esh\share\cm10\result.xlsm')
+            #endregion Save workbooks
 
+
+            ########################################################
+            #region Database logging
             if response.headers.get('Content-Type') == 'application/json':
                 try:
                     response_data = response.json()
@@ -147,7 +178,6 @@ class cm10(viewsets.ViewSet):
             else:
                 response_data = base64.b64encode(response.content).decode('utf-8')
 
-            # request simulation logging
             log = RequestLog.objects.create(
                 username=request.session.get('username'),
                 request_type='POST',
@@ -156,8 +186,11 @@ class cm10(viewsets.ViewSet):
                 file_path=file_path if response.headers.get('Content-Type') != 'application/json' else None,
                 additional_info={'status_code': response.status_code}
             )
+            #endregion  Database logging
 
-            # Django response
+
+            ########################################################
+            #region Django response
             if response.headers.get('Content-Type') == 'application/json':
                 try:
                     return Response(response.json())
@@ -165,5 +198,7 @@ class cm10(viewsets.ViewSet):
                     return Response(response.text, status=response.status_code)
             else:
                 return Response(response.text, status=response.status_code)
+            #endregion Django response
+
 
         return Response(serializer.errors, status=400)
