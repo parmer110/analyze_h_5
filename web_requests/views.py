@@ -60,22 +60,38 @@ class cm10(viewsets.ViewSet):
             
             ########################################################
             #region Initialization
+            # Directories path
             shared_dir = r'C:\Users\eshraghi\Documents\esh\share\cm10\temp'
             calc_file_path = r'C:\Users\eshraghi\Documents\esh\share\cm10\source\میسکال  مشاوران - Main.xlsm'
-
+            
+            # Hijri Date Time
             now = jdatetime.datetime.now()
             formatted_date = now.strftime('%Y_%m_%d_%H_%M_%S')
-
+            year = now.year
+            month = now.month
+            day = now.day
+            hour = now.hour
+            minute = now.minute
+            nearest_hour = f"{hour:02}:00"
+            ten_minutes_later = f"{hour:02}:10"
+            date_part = '-'.join(formatted_date.split('_')[:3])
+            start_at = request.data.get('start_at', f"{date_part} 00:00")
+            end_at = request.data.get('end_at', f"{date_part} {ten_minutes_later}")
+            
+            # Login's token
             token = request.session.get('token')
             headers = {
                 'Authorization': f'Bearer {token}'
             }
+            
+            # request parameters
             params = {
                 'export_data': serializer.validated_data['export_data'],
                 'call_type[]': serializer.validated_data['call_type'],
-                'start_at': serializer.validated_data['start_at'],
-                'end_at': serializer.validated_data['end_at']
+                'start_at':  start_at,
+                'end_at': end_at
             }
+
             #endregion Initialization
 
 
@@ -86,6 +102,8 @@ class cm10(viewsets.ViewSet):
             response = requests.post('https://api.hamkadeh.com/api/accounting/call-log/index', headers=headers, params=params)
 
             downloaded_workbook = openpyxl.load_workbook(BytesIO(response.content))
+            # Set calculation mode to manual
+            downloaded_workbook.calculation = openpyxl.workbook.properties.CalcProperties(calcMode='manual')
 
             downloaded_sheet1 = downloaded_workbook['Sheet1']
             
@@ -93,7 +111,11 @@ class cm10(viewsets.ViewSet):
             max_col = 13
             
             # Uploading reference Excel file + manipulation and merge before
-            workbook = openpyxl.load_workbook(calc_file_path, keep_vba=True)
+            try:
+                workbook = openpyxl.load_workbook(calc_file_path, keep_vba=True)
+                workbook.calculation =openpyxl.workbook.properties.CalcProperties(calcMode='manual')
+            except FileNotFoundError:
+                print("The source file for CM10 was not found.")
             #endregion Preparing Excel files
 
 
@@ -104,15 +126,15 @@ class cm10(viewsets.ViewSet):
             sheet2 = workbook['comand_center-10min']
             sheet3 = workbook['Tamas_kol']
 
-            # Perform the manipulations
-            sheet1['B3'] = 14031026
-            sheet1['B4'] = 14031026
-            sheet1['B5'] = '12:00'
-            sheet1['B6'] = '12:10'
-            sheet2['B3'] = 14031026
-            sheet2['B4'] = 14031026
-            sheet2['B5'] = '00:00'
-            sheet2['B6'] = '12:00'
+            # Perform the manipulations            
+            sheet1['B3'] = f"{year}{month}{day}"
+            sheet1['B4'] = f"{year}{month}{day}"
+            sheet1['B5'] = '00:00'
+            sheet1['B6'] = nearest_hour
+            sheet2['B3'] = f"{year}{month}{day}"
+            sheet2['B4'] = f"{year}{month}{day}"
+            sheet2['B5'] = nearest_hour
+            sheet2['B6'] = ten_minutes_later
 
             # Delete range A:M in Tamas_kol
             for row in sheet3.iter_rows(min_col=1, max_col=13):
@@ -154,9 +176,9 @@ class cm10(viewsets.ViewSet):
                     filename = filename[0]
                     filename = f"{filename}_{formatted_date}.xlsx"
                 else:
-                    filename = f"{formatted_date}_response.xlsx"
+                    filename = f"response_{formatted_date}.xlsx"
             else:
-                filename = f"{formatted_date}_response.xlsx"
+                filename = f"response_{formatted_date}.xlsx"
 
             # Save exported file 
             file_path = os.path.join(shared_dir, filename)
@@ -164,7 +186,8 @@ class cm10(viewsets.ViewSet):
                 f.write(response.content)
 
             # Reference (formulas)
-            workbook.save(r'C:\Users\eshraghi\Documents\esh\share\cm10\result.xlsm')
+            workbook._calculation_mode = 'auto'
+            workbook.save(f'C:\\Users\\eshraghi\\Documents\\esh\\share\\cm10\\result_{formatted_date}.xlsm')
             #endregion Save workbooks
 
 
