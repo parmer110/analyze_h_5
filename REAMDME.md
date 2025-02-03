@@ -130,3 +130,7 @@ Please guide me about overall study and structure, applications creation and all
 ### General Notes
 - Maintain separate branches for Windows and Linux versions.
 - Regularly merge changes from the main branch to keep both versions up-to-date.
+
+## Efficient Data Manipulation:
+Use list comprehensions or batch processing to handle large data sets.
+Minimize the number of times you access the workbook.

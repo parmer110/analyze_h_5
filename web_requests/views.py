@@ -4,6 +4,7 @@ import json
 import requests
 import base64
 import jdatetime
+import datetime
 from django.conf import settings
 from django.http import FileResponse
 from rest_framework import viewsets
@@ -64,19 +65,29 @@ class cm10(viewsets.ViewSet):
             shared_dir = r'C:\Users\eshraghi\Documents\esh\share\cm10\temp'
             calc_file_path = r'C:\Users\eshraghi\Documents\esh\share\cm10\source\میسکال  مشاوران - Main.xlsm'
             
-            # Hijri Date Time
-            now = jdatetime.datetime.now()
-            formatted_date = now.strftime('%Y_%m_%d_%H_%M_%S')
-            year = now.year
-            month = now.month
-            day = now.day
-            hour = now.hour
-            minute = now.minute
+            # Jalali Date Time
+            now_jalali = jdatetime.datetime.now()
+            formatted_jalali_date = now_jalali.strftime('%Y_%m_%d_%H_%M_%S')
+            year = now_jalali.year
+            month = now_jalali.month
+            day = now_jalali.day
+            
+            # Gregorian Date Time
+            gregorian_now = datetime.datetime.now()
+            date_gregorian = gregorian_now.date()
+
+            # Time handling
+            hour = gregorian_now.hour
+            # For "comand_center-10min" sheet and "comand_center kol" one in formula source
             nearest_hour = f"{hour:02}:00"
+            # For "comand_center-10min" sheet in formula source
             ten_minutes_later = f"{hour:02}:10"
-            date_part = '-'.join(formatted_date.split('_')[:3])
-            start_at = request.data.get('start_at', f"{date_part} 00:00")
-            end_at = request.data.get('end_at', f"{date_part} {ten_minutes_later}")
+            # Handling request dynamically
+            start_at_gregorian = serializer.validated_data.get('start_at', f"{date_gregorian} 00:00")
+            end_at_gregorian = serializer.validated_data.get('end_at', f"{date_gregorian} {ten_minutes_later}")
+
+            app = xw.App(visible=False)
+            app.screen_updating = False
             
             # Login's token
             token = request.session.get('token')
@@ -88,10 +99,9 @@ class cm10(viewsets.ViewSet):
             params = {
                 'export_data': serializer.validated_data['export_data'],
                 'call_type[]': serializer.validated_data['call_type'],
-                'start_at':  start_at,
-                'end_at': end_at
+                'start_at':  start_at_gregorian,
+                'end_at': end_at_gregorian
             }
-
             #endregion Initialization
 
 
@@ -101,93 +111,114 @@ class cm10(viewsets.ViewSet):
             # Request simulation core
             response = requests.post('https://api.hamkadeh.com/api/accounting/call-log/index', headers=headers, params=params)
 
-            downloaded_workbook = openpyxl.load_workbook(BytesIO(response.content))
-            # Set calculation mode to manual
-            downloaded_workbook.calculation = openpyxl.workbook.properties.CalcProperties(calcMode='manual')
-
-            downloaded_sheet1 = downloaded_workbook['Sheet1']
-            
-            max_row = downloaded_sheet1.max_row
-            max_col = 13
+            downloaded_df = pd.read_excel(BytesIO(response.content))
+            # downloaded_df.to_excel(f'{shared_dir}\downloaded_df.xlsx', index=False)
+            max_row = len(downloaded_df) + 1
             
             # Uploading reference Excel file + manipulation and merge before
             try:
-                workbook = openpyxl.load_workbook(calc_file_path, keep_vba=True)
-                workbook.calculation =openpyxl.workbook.properties.CalcProperties(calcMode='manual')
-            except FileNotFoundError:
-                print("The source file for CM10 was not found.")
+                if calc_file_path in [book.fullname for book in app.books]:
+                    workbook = app.books[calc_file_path]
+                else:
+                    try:
+                        workbook = app.books.open(calc_file_path, update_links=False)
+                    except FileNotFoundError:
+                        print("The source file for CM10 was not found.")
+                        # Handle the error appropriately, maybe return or exit
             #endregion Preparing Excel files
 
-
-            ########################################################
-            # region Manipulation, Mixing, Calculate
-            # Access the sheets
-            sheet1 = workbook['comand_center kol']
-            sheet2 = workbook['comand_center-10min']
-            sheet3 = workbook['Tamas_kol']
-
-            # Perform the manipulations            
-            sheet1['B3'] = f"{year}{month}{day}"
-            sheet1['B4'] = f"{year}{month}{day}"
-            sheet1['B5'] = '00:00'
-            sheet1['B6'] = nearest_hour
-            sheet2['B3'] = f"{year}{month}{day}"
-            sheet2['B4'] = f"{year}{month}{day}"
-            sheet2['B5'] = nearest_hour
-            sheet2['B6'] = ten_minutes_later
-
-            # Delete range A:M in Tamas_kol
-            for row in sheet3.iter_rows(min_col=1, max_col=13):
-                for cell in row:
-                    cell.value = None
-
-            # Copy data to Tamas_kol
-            for row in range(1, max_row + 1):
-                for col in range(1, max_col + 1):
-                    cell_value = downloaded_sheet1.cell(row=row, column=col).value
-                    sheet3.cell(row=row, column=col).value = cell_value
-
-            # Extend formulas in range N:AM
-            for row in range(1, max_row + 1):
-                for col in range(14, 40):  # Columns N to AM
-                    formula_cell = sheet3.cell(row=row, column=col)
-                    base_formula = formula_cell.value
-                    formula_cell.value = base_formula
-
-            # Clear any extra rows beyond max_row
-            for row in range(max_row + 1, sheet3.max_row + 1):
-                for col in range(14, 40):  # Columns N to AM
-                    sheet3.cell(row=row, column=col).value = None
-            #endregion Manipulation, Mixing, Calculate
+                workbook.app.calculation = 'manual'
 
 
-            ########################################################
-            # Save workbooks
-            # Downloaded
-            # Getting file name
-            content_disposition = response.headers.get('Content-Disposition')
+                ########################################################
+                # region Manipulation, Mixing, Calculate
+                # Access the sheets
+                # range for data entry
+                sheet1 = workbook.sheets['comand_center kol']
+                sheet2 = workbook.sheets['comand_center-10min']
+                sheet3 = workbook.sheets['Tamas_kol']
+                # range for convert same value
+                sheet11 = workbook.sheets['miscal-Kol-10min']
+                sheet12 = workbook.sheets['miss-Balla-10min']
+                sheet13 = workbook.sheets['miss-Balla']
+                sheet14 = workbook.sheets['miscal-Kol']
 
-            if not os.path.exists(shared_dir):
-                os.makedirs(shared_dir)
 
-            if content_disposition:
-                filename = re.findall('filename=(.+)', content_disposition)
-                if filename:
-                    filename = filename[0]
-                    filename = f"{filename}_{formatted_date}.xlsx"
+                # Perform the manipulations
+                values_sheet1 = [
+                    [f"{year}{month}{day}"],
+                    [f"{year}{month}{day}"],
+                    ['00:00'],
+                    [nearest_hour]
+                ]
+                sheet1.range('B3:B6').value = values_sheet1
+                values_sheet2 = [
+                    [f"{year}{month}{day}"],
+                    [f"{year}{month}{day}"],
+                    [nearest_hour],
+                    [ten_minutes_later]
+                ]
+                sheet2.range('B3:B6').value = values_sheet2                
+
+                # Clear range A:M in Tamas_kol
+                last_row = sheet3.range('A1').end('down').row
+                sheet3.range(f'A1:M{last_row}').clear_contents()
+
+                # Copy data to Tamas_kol
+                sheet3.range('A1').options(index=False).value = downloaded_df.iloc[:, :13]
+
+                # Extend formulas in range N:AM
+                last_row = sheet3.range('N1').end('down').row
+                if last_row < max_row:
+                    formulas = [sheet3.cells(last_row, col).formula for col in range(14, 40)]
+                    for col, formula in enumerate(formulas, start=14):
+                        sheet3.range((last_row + 1, col), (max_row, col)).formula = formula
+                # Clear any extra rows beyond max_row
+                elif last_row > max_row:
+                    sheet3.range(f'N{max_row + 1}:AM{last_row}').clear_contents()
+                
+                workbook.app.calculate()
+                
+                # Converting sheets to value
+                for sheet in [sheet11, sheet12, sheet13, sheet14]:
+                    range = sheet.used_range
+                    range.value = range.value
+
+                # sorting specific filtered column
+                # sheet12.api.Range('M8').Sort
+
+                #endregion Manipulation, Mixing, Calculate
+
+
+                ########################################################
+                # Save workbooks
+                # Downloaded
+                # Getting file name
+                content_disposition = response.headers.get('Content-Disposition')
+
+                if not os.path.exists(shared_dir):
+                    os.makedirs(shared_dir)
+
+                if content_disposition:
+                    filename = re.findall('filename=(.+)', content_disposition)
+                    if filename:
+                        filename = filename[0]
+                        filename = f"{filename}_{formatted_jalali_date}.xlsx"
+                    else:
+                        filename = f"response_{formatted_jalali_date}.xlsx"
                 else:
-                    filename = f"response_{formatted_date}.xlsx"
-            else:
-                filename = f"response_{formatted_date}.xlsx"
+                    filename = f"response_{formatted_jalali_date}.xlsx"
 
-            # Save exported file 
-            file_path = os.path.join(shared_dir, filename)
-            with open(file_path, 'wb') as f:
-                f.write(response.content)
+                # Save exported file 
+                file_path = os.path.join(shared_dir, filename)
+                with open(file_path, 'wb') as f:
+                    f.write(response.content)
 
-            # Reference (formulas)
-            workbook._calculation_mode = 'auto'
-            workbook.save(f'C:\\Users\\eshraghi\\Documents\\esh\\share\\cm10\\result_{formatted_date}.xlsm')
+                # Reference (formulas)
+                workbook.save(f'C:\\Users\\eshraghi\\Documents\\esh\\share\\cm10\\result_{formatted_jalali_date}.xlsm')
+            
+            finally:
+                app.quit()
             #endregion Save workbooks
 
 
