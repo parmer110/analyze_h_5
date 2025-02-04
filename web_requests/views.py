@@ -5,6 +5,7 @@ import requests
 import base64
 import jdatetime
 import datetime
+import time
 from django.conf import settings
 from django.http import FileResponse
 from rest_framework import viewsets
@@ -61,6 +62,8 @@ class cm10(viewsets.ViewSet):
             
             ########################################################
             #region Initialization
+            # Request executation duration time
+            starting_time = time.time()
             # Directories path
             shared_dir = r'C:\Users\eshraghi\Documents\esh\share\cm10\temp'
             calc_file_path = r'C:\Users\eshraghi\Documents\esh\share\cm10\source\میسکال  مشاوران - Main.xlsm'
@@ -185,8 +188,12 @@ class cm10(viewsets.ViewSet):
                     range.value = range.value
 
                 # sorting specific filtered column
-                # sheet12.api.Range('M8').Sort
-
+                sheet12.range('B8:V8').expand('down').api.Sort(
+                    Key1=sheet12.range("M9").api,
+                    Order1=2,
+                    Header=1,
+                    Orientation=1
+                )
                 #endregion Manipulation, Mixing, Calculate
 
 
@@ -232,13 +239,18 @@ class cm10(viewsets.ViewSet):
             else:
                 response_data = base64.b64encode(response.content).decode('utf-8')
 
+            ext_duration = datetime.timedelta(seconds=time.time() - starting_time)
+
             log = RequestLog.objects.create(
+                request_name="Consultant Misscall 10 minutes",
                 username=request.session.get('username'),
                 request_type='POST',
                 request_data=serializer.validated_data,
                 response_data=response_data if response.headers.get('Content-Type') == 'application/json' else None,
                 file_path=file_path if response.headers.get('Content-Type') != 'application/json' else None,
-                additional_info={'status_code': response.status_code}
+                additional_info={'status_code': response.status_code},
+                execution_time=ext_duration
+                
             )
             #endregion  Database logging
 

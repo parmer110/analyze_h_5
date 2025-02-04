@@ -90,6 +90,12 @@ Please guide me about overall study and structure, applications creation and all
 1. ## Web Request Handling
 - Create views to handle incoming requests.
 - Use Django's HttpResponse to return Excel files.
+{
+  "export_data": "1",
+  "call_type": ["1"],
+  "start_at": "2025-01-15 00:00",
+  "end_at": "2025-01-15 12:10"
+}
 
 2. ## Excel Processing
 - Use libraries like pandas and openpyxl for Excel file manipulation.

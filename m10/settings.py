@@ -1,9 +1,10 @@
 from pathlib import Path
+from decouple import config
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
-SECRET_KEY = 'django-insecure-__^&m+j2z20jb9)c@713#-dfd$o$@19rct3pjmm%x8cx0=^(m0'
+SECRET_KEY = config('SECRET_KEY')
 
 DEBUG = True
 
@@ -17,6 +18,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'common',
     'rest_framework',
     'web_requests',
     'excel_processing',
@@ -58,14 +60,13 @@ WSGI_APPLICATION = 'm10.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'analyzeunit',
-        'USER': 'parmer_110',
-        'PASSWORD': 'Aa4812@',
-        'HOST': '192.168.134.44',
-        'PORT': '5432',
+        'NAME': config('DB_NAME'),
+        'USER': config('DB_USER'),
+        'PASSWORD': config('DB_PASSWORD'),
+        'HOST': config('DB_HOST'),
+        'PORT': config('DB_PORT'),
     }
 }
-
 
 AUTH_PASSWORD_VALIDATORS = [
     {
