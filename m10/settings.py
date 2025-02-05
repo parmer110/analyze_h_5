@@ -23,7 +23,8 @@ INSTALLED_APPS = [
     'web_requests',
     'excel_processing',
     'data_manipulation',
-    'integration'
+    'integration',
+    'scheduler'
 ]
 
 MIDDLEWARE = [
