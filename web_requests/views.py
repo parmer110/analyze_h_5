@@ -18,7 +18,7 @@ import xlwings as xw
 import pandas as pd
 from io import BytesIO
 from django.shortcuts import render
-from .serializers import SendCodeSerializer, LoginSerializer, cm10Serializer
+from .serializers import SendCodeSerializer, LoginSerializer, AccountingCallLog
 from .models import RequestLog, Requests
 
 
@@ -55,10 +55,18 @@ class LoginViewSetHamkadeh(viewsets.ViewSet):
             return Response(response.json())
         return Response(serializer.errors, status=400)
     
+def run(request):
+    req = Requests.objects.all()
+    return render(request, "web_requests/index.html", {
+        "requests": req
+    })
 
+
+###########################################
+# ده دقیقه میسکال مشاور
 class cm10(viewsets.ViewSet):
     def create(self, request):
-        serializer = cm10Serializer(data=request.data)
+        serializer = AccountingCallLog(data=request.data)
         if serializer.is_valid():
             
             ########################################################
@@ -101,8 +109,8 @@ class cm10(viewsets.ViewSet):
             
             # request parameters
             params = {
-                'export_data': serializer.validated_data['export_data'],
-                'call_type[]': serializer.validated_data['call_type'],
+                'export_data': serializer.validated_data.get('export_data', "1"),
+                'call_type[]': serializer.validated_data.get('call_type', ["1"]),
                 'start_at':  start_at_gregorian,
                 'end_at': end_at_gregorian
             }
@@ -116,7 +124,7 @@ class cm10(viewsets.ViewSet):
             response = requests.post('https://api.hamkadeh.com/api/accounting/call-log/index', headers=headers, params=params)
 
             downloaded_df = pd.read_excel(BytesIO(response.content))
-            # downloaded_df.to_excel(f'{shared_dir}\downloaded_df.xlsx', index=False)
+
             max_row = len(downloaded_df) + 1
             
             # Uploading reference Excel file + manipulation and merge before
@@ -223,7 +231,7 @@ class cm10(viewsets.ViewSet):
                     f.write(response.content)
 
                 # Reference (formulas)
-                workbook.save(f'C:\\Users\\eshraghi\\Documents\\esh\\share\\cm10\\result_{formatted_jalali_date}.xlsm')
+                workbook.save(f'C:\\Users\\eshraghi\\Documents\\esh\\share\\cm10\\cm10_{formatted_jalali_date}.xlsm')
             
             finally:
                 app.quit()
@@ -243,7 +251,7 @@ class cm10(viewsets.ViewSet):
             ext_duration = datetime.timedelta(seconds=time.time() - starting_time)
 
             log = RequestLog.objects.create(
-                request_name="Consultant Misscall 10 minutes",
+                request_name="cm10",
                 username=request.session.get('username'),
                 request_type='POST',
                 request_data=serializer.validated_data,
@@ -271,8 +279,195 @@ class cm10(viewsets.ViewSet):
         return Response(serializer.errors, status=400)
     
 ###########################################
-def run(request):
-    req = Requests.objects.all()
-    return render(request, "web_requests/index.html", {
-        "requests": req
-    })
+# آمار عملکرد پشتیبانٍ مشاور
+# region Consultant’s support functioning statistics
+class c_sup(viewsets.ViewSet):
+    def create(self, request):
+        serializer = AccountingCallLog(data=request.data)
+        if serializer.is_valid():
+            
+            ########################################################
+            #region Initialization
+            # Request executation duration time
+            starting_time = time.time()
+            # Directories path
+            shared_dir = r'C:\Users\eshraghi\Documents\esh\share\c_sup\temp'
+            calc_file_path = r'C:\Users\eshraghi\Documents\esh\share\c_sup\source\misscall--Poshtiban-MAIN.xlsx'
+
+            # Jalali Date Time
+            now_jalali = jdatetime.datetime.now()
+            formatted_jalali_date = now_jalali.strftime('%Y_%m_%d_%H_%M_%S')
+            year_jalali = now_jalali.year
+            month_jalali = now_jalali.month
+            day_jalali = now_jalali.day
+            
+            # Gregorian Date Time
+            gregorian_now = datetime.datetime.now()
+            date_gregorian = gregorian_now.date()
+
+            # Time handling
+            hour = gregorian_now.hour
+            nearest_odd_hour = hour if hour % 2 == 1 else hour - 1
+            # For "comand_center" sheet
+            nearest_odd_hour_formatted = f"{nearest_odd_hour:02}:00"
+            # Handling request dynamically
+            start_at_gregorian = serializer.validated_data.get('start_at', f"{date_gregorian} 00:00")
+            end_at_gregorian = serializer.validated_data.get('end_at', f"{date_gregorian} {nearest_odd_hour_formatted}")
+
+            app = xw.App(visible=False)
+            app.screen_updating = False
+
+            # Login's token
+            token = request.session.get('token')
+            headers = {
+                'Authorization': f'Bearer {token}'
+            }
+
+            # request parameters
+            params = {
+                'export_data': serializer.validated_data.get('export_data', "1"),
+                'call_type[]': serializer.validated_data.get('call_type', ["4"]),
+                'start_at':  start_at_gregorian,
+                'end_at': end_at_gregorian
+            }
+
+            response = requests.post('https://api.hamkadeh.com/api/accounting/call-log/index', headers=headers, params=params)
+
+            downloaded_df = pd.read_excel(BytesIO(response.content))
+
+            max_row = len(downloaded_df) + 1
+
+            try:
+                if calc_file_path in [book.fullname for book in app.books]:
+                    workbook = app.books[calc_file_path]
+                else:
+                    try:
+                        workbook = app.books.open(calc_file_path, update_links=False)
+                    except FileNotFoundError:
+                        print("The source file for CM10 was not found.")
+                        # Handle the error appropriately, maybe return or exit
+            #endregion Preparing Excel files
+
+                workbook.app.calculation = 'manual'
+
+
+                # region Manipulation, Mixing, Calculate
+                # Access the sheets
+                # range for data entry
+                sheet1 = workbook.sheets['comand_center']
+                sheet2 = workbook.sheets['Tamas_Vorodi']
+                sheet4 = workbook.sheets['میسکال ساعتی پش']
+                sheet5 = workbook.sheets['تعداد تماس']
+                sheet6 = workbook.sheets['ResultH']
+
+                # Perform the manipulations
+                values_sheet1 = [
+                    [f"{year_jalali}{month_jalali}{day_jalali}"],
+                    [f"{year_jalali}{month_jalali}{day_jalali}"],
+                    ['00:00'],
+                    [nearest_odd_hour_formatted]
+                ]
+                sheet1.range('B3:B6').value = values_sheet1
+
+                # Clear range A:M in Tamas_Vorodi
+                last_row = sheet2.range('A1').end('down').row
+                sheet2.range(f'A1:N{last_row}').clear_contents()
+
+                # Copy data to Tamas_kol
+                sheet2.range('A1').options(index=False).value = downloaded_df.iloc[:, :14]
+
+                # Extend formulas in range O:AD
+                last_row = sheet2.range('O1').end('down').row
+                if last_row < max_row:
+                    formulas = [sheet2.cells(last_row, col).formula for col in range(15, 30)]
+                    for col, formula in enumerate(formulas, start=15):
+                        sheet2.range((last_row + 1, col), (max_row, col)).formula = formula
+                # Clear any extra rows beyond max_row
+                elif last_row > max_row:
+                    sheet2.range(f'N{max_row + 1}:AD{last_row}').clear_contents()
+                
+                # sorting specific filtered column
+                sheet2.range('A1:AD1').expand('down').api.Sort(
+                    Key1=sheet2.range("M2").api,
+                    Order1=1,
+                    Header=1,
+                    Orientation=1
+                )
+
+                workbook.app.calculate()
+
+                # Converting sheets to value
+                range5 = sheet5.used_range
+                range5.value = range5.value
+
+                # sorting specific filtered column
+                sheet6.range('B3:N3').expand('down').api.Sort(
+                    Key1=sheet6.range("D4").api,
+                    Order1=2,
+                    Header=1,
+                    Orientation=1
+                )
+
+                ########################################################
+                # Save workbooks
+                # Downloaded
+                # Getting file name
+                content_disposition = response.headers.get('Content-Disposition')
+
+                if not os.path.exists(shared_dir):
+                    os.makedirs(shared_dir)
+
+                if content_disposition:
+                    filename = re.findall('filename=(.+)', content_disposition)
+                    if filename:
+                        filename = filename[0]
+                        filename = f"{filename}_{formatted_jalali_date}.xlsx"
+                    else:
+                        filename = f"response_{formatted_jalali_date}.xlsx"
+                else:
+                    filename = f"response_{formatted_jalali_date}.xlsx"
+
+                # Save exported file 
+                file_path = os.path.join(shared_dir, filename)
+                with open(file_path, 'wb') as f:
+                    f.write(response.content)
+
+                # Reference (formulas)
+                workbook.save(f'C:\\Users\\eshraghi\\Documents\\esh\\share\\c_sup\\c_sup_{formatted_jalali_date}.xlsm')
+
+            finally:
+                app.quit()
+
+            #region Database logging
+            if response.headers.get('Content-Type') == 'application/json':
+                try:
+                    response_data = response.json()
+                except json.JSONDecodeError:
+                    response_data = response.text
+            else:
+                response_data = base64.b64encode(response.content).decode('utf-8')
+
+            ext_duration = datetime.timedelta(seconds=time.time() - starting_time)
+
+            log = RequestLog.objects.create(
+                request_name="c_sup",
+                username=request.session.get('username'),
+                request_type='POST',
+                request_data=serializer.validated_data,
+                response_data=response_data if response.headers.get('Content-Type') == 'application/json' else None,
+                # file_path=file_path if response.headers.get('Content-Type') != 'application/json' else None,
+                additional_info={'status_code': response.status_code},
+                execution_time=ext_duration
+                
+            )
+            #endregion  Database logging
+
+            if response.headers.get('Content-Type') == 'application/json':
+                try:
+                    return Response(response.json())
+                except json.JSONDecodeError:
+                    return Response(response.text, status=response.status_code)
+            else:
+                return Response(response.text, status=response.status_code)
+    
+# endregion Consultant’s support functioning statistics
