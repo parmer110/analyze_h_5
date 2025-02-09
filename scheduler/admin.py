@@ -1,8 +1,5 @@
 from django.contrib import admin
-from .models import RequestLog, ScheduledRequest
+from .models import RequestSchedulerLog
 
-class ScheduledRequestAdmin(admin.ModelAdmin):
-    list_display=('id', 'name', 'url', 'method', 'header', 'body')
 
-admin.site.register(RequestLog)
-admin.site.register(ScheduledRequest, ScheduledRequestAdmin)
+admin.site.register(RequestSchedulerLog)

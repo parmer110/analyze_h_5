@@ -1,12 +1,17 @@
-<html>
-    <head>
-        
-    </head>
-    <body>
-        <form method="post">
-            {% csrf_token %}
-            <button type="submit">Fetch Data</button>
-        </form>        
-    </body>
+{% extends "web_requests/layout.html" %}
 
-</html>
+{% block content %}
+{% for request in requests %}
+<table>
+<tr>
+    <td>
+        <div class="tooltip" data-url="{{ request.url }}" data-method="{{ request.method }}" data-header="{{ request.header }}" data-body="{{ request.body }}">
+            {{ request.name }}
+            <span class="tooltip-text">{{ request.description }}</span>
+        </div>
+    </td>
+</tr>
+</table>
+{% endfor %}
+{% endblock %}
+

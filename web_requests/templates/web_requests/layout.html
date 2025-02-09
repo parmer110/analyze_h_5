@@ -1,0 +1,40 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}مدیریت گزارشات{% endblock %}</title>
+    
+    <!-- CSS -->
+    <link rel="stylesheet" href="{% static 'css/main.css' %}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="{% static 'js/index.js' %}"></script>
+    
+</head>
+<body>
+    <header class="app-header">
+        <nav class="main-nav">
+            <div class="nav-brand">
+                <i class="fas fa-project-diagram"></i>
+                <h1>سامانه گزارشات</h1>
+            </div>
+            <div class="nav-links">
+                <a href="" class="nav-link active">خانه</a>
+                <a href="" class="nav-link">گزارشات</a>
+                <a href="" class="nav-link">تاریخچه</a>
+            </div>
+        </nav>
+    </header>
+
+    <main class="main-content">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="app-footer">
+        <p>© 2024 سیستم گزارشات شرکت ♥۵۰۴۰♥</p>
+    </footer>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

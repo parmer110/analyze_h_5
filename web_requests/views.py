@@ -17,8 +17,9 @@ import openpyxl
 import xlwings as xw
 import pandas as pd
 from io import BytesIO
+from django.shortcuts import render
 from .serializers import SendCodeSerializer, LoginSerializer, cm10Serializer
-from .models import RequestLog
+from .models import RequestLog, Requests
 
 
 class SendSMSCodeViewSeHamkadeh(viewsets.ViewSet):
@@ -268,3 +269,10 @@ class cm10(viewsets.ViewSet):
 
 
         return Response(serializer.errors, status=400)
+    
+###########################################
+def run(request):
+    req = Requests.objects.all()
+    return render(request, "web_requests/index.html", {
+        "requests": req
+    })

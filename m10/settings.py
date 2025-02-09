@@ -97,4 +97,6 @@ APPEND_SLASH = False
 
 STATIC_URL = 'static/'
 
+STATICFILES_DIRS = [BASE_DIR / "web_requests/static"]
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
