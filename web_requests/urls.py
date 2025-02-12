@@ -1,12 +1,20 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import SendSMSCodeViewSeHamkadeh, LoginViewSetHamkadeh, cm10, c_sup, run
+from .views import (
+    SendSMSCodeViewSeHamkadeh, LoginViewSetHamkadeh, SendSMSCodeViewSet5040, LoginViewSet5040,
+    cm10, c_sup,
+    run, 
+)
 
 router = DefaultRouter()
-router.register(r'send-code', SendSMSCodeViewSeHamkadeh, basename='send-code')
-router.register(r'login', LoginViewSetHamkadeh, basename='login')
-router.register(r'cm10', cm10, basename='cm10')
-router.register(r'c_sup', c_sup, basename='c_sup')
+router.register(r'h/send-code', SendSMSCodeViewSeHamkadeh, basename='send-code-h')
+router.register(r'h/login', LoginViewSetHamkadeh, basename='login-h')
+router.register(r'h/cm10', cm10, basename='cm10')
+router.register(r'h/c_sup', c_sup, basename='c_sup')
+
+router.register(r'5/send-code', SendSMSCodeViewSet5040, basename='send-code-5')
+router.register(r'5/login', LoginViewSet5040, basename='login-5')
+
 
 urlpatterns = [
     path('', include(router.urls)),

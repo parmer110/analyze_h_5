@@ -7,6 +7,7 @@ class SendCodeSerializer(serializers.Serializer):
 
 class LoginSerializer(serializers.Serializer):
     username = serializers.CharField()
+    password = serializers.CharField(required=False, default=serializers.empty)
     code = serializers.CharField()
 
 class AccountingCallLog(serializers.Serializer):

@@ -28,6 +28,7 @@ class SendSMSCodeViewSeHamkadeh(viewsets.ViewSet):
         if serializer.is_valid():
             response = requests.post('https://api.hamkadeh.com/api/auth/login/send-code', json=serializer.validated_data)
             log = RequestLog.objects.create(
+                request_name = 'Send SMS Hamkahdeh',
                 username=serializer.validated_data['username'],
                 request_type='send_code',
                 request_data=serializer.validated_data,
@@ -42,6 +43,7 @@ class LoginViewSetHamkadeh(viewsets.ViewSet):
         if serializer.is_valid():
             response = requests.post('https://api.hamkadeh.com/api/auth/login', json=serializer.validated_data)
             log = RequestLog.objects.create(
+                request_name = 'login Hamkadeh',
                 username=serializer.validated_data['username'],
                 request_type='login',
                 request_data=serializer.validated_data,
@@ -51,7 +53,41 @@ class LoginViewSetHamkadeh(viewsets.ViewSet):
             if token:
                 request.session['token'] = token
                 request.session['username'] = serializer.validated_data['username']
-                # request.session['token'] = response.data.get('token')
+            return Response(response.json())
+        return Response(serializer.errors, status=400)
+
+class SendSMSCodeViewSet5040(viewsets.ViewSet):
+    def create(self, request):
+        serializer = SendCodeSerializer(data=request.data)
+        if serializer.is_valid():
+            response = requests.put('https://api.5040.me/api/auth/send-login-code', json=serializer.validated_data)
+            log = RequestLog.objects.create(
+                request_name = 'Send SMS 5040',
+                username=serializer.validated_data['username'],
+                request_type='send_code',
+                request_data=serializer.validated_data,
+                response_data=response.json()
+            )
+            return Response(response.json())
+        return Response(serializer.errors, status=400)
+
+class LoginViewSet5040(viewsets.ViewSet):
+    def create(self, request):
+        serializer = LoginSerializer(data=request.data)
+        if serializer.is_valid():
+            response = requests.post('https://api.hamkadeh.com/api/auth/login', json=serializer.validated_data)
+            log = RequestLog.objects.create(
+                request_name = 'login 5040',
+                username=serializer.validated_data['username'],
+                request_type='login',
+                request_data=serializer.validated_data,
+                response_data=response.json()
+            )
+            token = response.json().get('token')
+            if token:
+                request.session['token'] = token
+                request.session['username'] = serializer.validated_data['username']
+                request.session['password'] = response.data.get('password')
             return Response(response.json())
         return Response(serializer.errors, status=400)
     
@@ -182,9 +218,13 @@ class cm10(viewsets.ViewSet):
                 # Extend formulas in range N:AM
                 last_row = sheet3.range('N1').end('down').row
                 if last_row < max_row:
-                    formulas = [sheet3.cells(last_row, col).formula for col in range(14, 40)]
-                    for col, formula in enumerate(formulas, start=14):
-                        sheet3.range((last_row + 1, col), (max_row, col)).formula = formula
+                    xl_app = sheet2.book.app.api
+                    for col in range(14, 40):
+                        xl_app.Range(
+                            xl_app.Cells(last_row, col),
+                            xl_app.Cells(max_row, col)
+                        ).FillDown()
+                        
                 # Clear any extra rows beyond max_row
                 elif last_row > max_row:
                     sheet3.range(f'N{max_row + 1}:AM{last_row}').clear_contents()
@@ -193,8 +233,8 @@ class cm10(viewsets.ViewSet):
                 
                 # Converting sheets to value
                 for sheet in [sheet11, sheet12, sheet13, sheet14]:
-                    range = sheet.used_range
-                    range.value = range.value
+                    sheet_range = sheet.used_range
+                    sheet_range.value = sheet_range.value
 
                 # sorting specific filtered column
                 sheet12.range('B8:V8').expand('down').api.Sort(
@@ -316,6 +356,8 @@ class c_sup(viewsets.ViewSet):
 
             app = xw.App(visible=False)
             app.screen_updating = False
+            app.calculation = 'manual'
+            app.enable_events = False
 
             # Login's token
             token = request.session.get('token')
@@ -348,7 +390,7 @@ class c_sup(viewsets.ViewSet):
                         # Handle the error appropriately, maybe return or exit
             #endregion Preparing Excel files
 
-                workbook.app.calculation = 'manual'
+                # workbook.app.calculation = 'manual'
 
 
                 # region Manipulation, Mixing, Calculate
@@ -369,7 +411,7 @@ class c_sup(viewsets.ViewSet):
                 ]
                 sheet1.range('B3:B6').value = values_sheet1
 
-                # Clear range A:M in Tamas_Vorodi
+                # Clear range A:N in Tamas_Vorodi
                 last_row = sheet2.range('A1').end('down').row
                 sheet2.range(f'A1:N{last_row}').clear_contents()
 
@@ -379,9 +421,13 @@ class c_sup(viewsets.ViewSet):
                 # Extend formulas in range O:AD
                 last_row = sheet2.range('O1').end('down').row
                 if last_row < max_row:
-                    formulas = [sheet2.cells(last_row, col).formula for col in range(15, 30)]
-                    for col, formula in enumerate(formulas, start=15):
-                        sheet2.range((last_row + 1, col), (max_row, col)).formula = formula
+                    xl_app = sheet2.book.app.api
+                    for col in range(15, 31):
+                        xl_app.Range(
+                            xl_app.Cells(last_row, col),
+                            xl_app.Cells(max_row, col)
+                        ).FillDown()
+
                 # Clear any extra rows beyond max_row
                 elif last_row > max_row:
                     sheet2.range(f'N{max_row + 1}:AD{last_row}').clear_contents()
@@ -433,7 +479,7 @@ class c_sup(viewsets.ViewSet):
                     f.write(response.content)
 
                 # Reference (formulas)
-                workbook.save(f'C:\\Users\\eshraghi\\Documents\\esh\\share\\c_sup\\c_sup_{formatted_jalali_date}.xlsm')
+                workbook.save(f'C:\\Users\\eshraghi\\Documents\\esh\\share\\c_sup\\c_sup_{formatted_jalali_date}.xlsx')
 
             finally:
                 app.quit()
