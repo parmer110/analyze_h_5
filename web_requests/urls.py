@@ -1,7 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
-    SendSMSCodeViewSeHamkadeh, LoginViewSetHamkadeh, SendSMSCodeViewSet5040, LoginViewSet5040,
+    SendSMSCodeViewSeHamkadeh, LoginViewSetHamkadeh, SendSMSCodeViewSet5040, LoginViewSet5040, RefreshSessionViewSet5040,
     cm10, c_sup,
     run, 
 )
@@ -19,4 +19,5 @@ router.register(r'5/login', LoginViewSet5040, basename='login-5')
 urlpatterns = [
     path('', include(router.urls)),
     path('run/', run, name="run_request"),
+     path('5/refresh/', RefreshSessionViewSet5040.as_view({'get': 'refresh_5'})),
 ]

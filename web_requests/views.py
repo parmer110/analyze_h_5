@@ -10,6 +10,7 @@ from django.conf import settings
 from django.http import FileResponse
 from rest_framework import viewsets
 from rest_framework.response import Response
+from rest_framework.decorators import action
 from django.http import HttpResponse
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -18,6 +19,9 @@ import xlwings as xw
 import pandas as pd
 from io import BytesIO
 from django.shortcuts import render
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from bs4 import BeautifulSoup
 from .serializers import SendCodeSerializer, LoginSerializer, AccountingCallLog
 from .models import RequestLog, Requests
 
@@ -49,9 +53,9 @@ class LoginViewSetHamkadeh(viewsets.ViewSet):
                 request_data=serializer.validated_data,
                 response_data=response.json()
             )
-            token = response.json().get('token')
-            if token:
-                request.session['token'] = token
+            token_h = response.json().get('token')
+            if token_h:
+                request.session['token_h'] = token_h
                 request.session['username'] = serializer.validated_data['username']
             return Response(response.json())
         return Response(serializer.errors, status=400)
@@ -75,7 +79,7 @@ class LoginViewSet5040(viewsets.ViewSet):
     def create(self, request):
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():
-            response = requests.post('https://api.hamkadeh.com/api/auth/login', json=serializer.validated_data)
+            response = requests.post('https://api.5040.me/api/auth/login', json=serializer.validated_data)
             log = RequestLog.objects.create(
                 request_name = 'login 5040',
                 username=serializer.validated_data['username'],
@@ -83,14 +87,36 @@ class LoginViewSet5040(viewsets.ViewSet):
                 request_data=serializer.validated_data,
                 response_data=response.json()
             )
-            token = response.json().get('token')
-            if token:
-                request.session['token'] = token
+            token_5 = response.json().get('token')
+            if token_5:
+                request.session['token_5'] = token_5
                 request.session['username'] = serializer.validated_data['username']
-                request.session['password'] = response.data.get('password')
+                request.session['password'] = serializer.validated_data['password']
             return Response(response.json())
         return Response(serializer.errors, status=400)
-    
+
+class RefreshSessionViewSet5040(viewsets.ViewSet):
+    @action(detail=False, methods=['get'], url_path='5/refresh')
+    def refresh_5(self, request):
+        token_5 = request.session.get('token_5')
+        if not token_5:
+            return Response({'error': 'توکن یافت نشد. ابتدا لاگین کنید.'}, status=401)
+        chrome_options = Options()
+        chrome_options.add_argument('--headless')
+        chrome_options.add_argument('--disable-gpu')
+        driver = webdriver.Chrome(options=chrome_options)
+        try:
+            driver.get('https://panel.5040.me/')
+            time.sleep(3)
+            page_source = driver.page_source
+            if ('name="username"' in page_source) or ('name="login-username"' in page_source) or ('id="password"' in page_source):
+                return Response({'status': 'نیاز به لاگین مجدد', 'content': page_source}, status=401)
+            return Response({'status': 'صفحه با موفقیت رفرش شد', 'content': page_source}, status=200)
+        except Exception as e:
+            return Response({'error': str(e)}, status=500)
+        finally:
+            driver.quit()                
+
 def run(request):
     req = Requests.objects.all()
     return render(request, "web_requests/index.html", {
@@ -138,9 +164,9 @@ class cm10(viewsets.ViewSet):
             app.screen_updating = False
             
             # Login's token
-            token = request.session.get('token')
+            token_h = request.session.get('token_h')
             headers = {
-                'Authorization': f'Bearer {token}'
+                'Authorization': f'Bearer {token_h}'
             }
             
             # request parameters
@@ -218,17 +244,14 @@ class cm10(viewsets.ViewSet):
                 # Extend formulas in range N:AM
                 last_row = sheet3.range('N1').end('down').row
                 if last_row < max_row:
-                    xl_app = sheet2.book.app.api
-                    for col in range(14, 40):
-                        xl_app.Range(
-                            xl_app.Cells(last_row, col),
-                            xl_app.Cells(max_row, col)
-                        ).FillDown()
-                        
+                    source = sheet2.range((last_row, 14), (last_row, 39))
+                    target = sheet2.range((last_row, 15), (max_row, 39))
+                    source.autofill(target)
+
                 # Clear any extra rows beyond max_row
                 elif last_row > max_row:
                     sheet3.range(f'N{max_row + 1}:AM{last_row}').clear_contents()
-                
+
                 workbook.app.calculate()
                 
                 # Converting sheets to value
@@ -239,6 +262,12 @@ class cm10(viewsets.ViewSet):
                 # sorting specific filtered column
                 sheet12.range('B8:V8').expand('down').api.Sort(
                     Key1=sheet12.range("M9").api,
+                    Order1=2,
+                    Header=1,
+                    Orientation=1
+                )
+                sheet13.range('B8:T8').expand('down').api.Sort(
+                    Key1=sheet13.range("L9").api,
                     Order1=2,
                     Header=1,
                     Orientation=1
@@ -358,11 +387,12 @@ class c_sup(viewsets.ViewSet):
             app.screen_updating = False
             app.calculation = 'manual'
             app.enable_events = False
+            app.display_alerts = False
 
             # Login's token
-            token = request.session.get('token')
+            token_h = request.session.get('token_h')
             headers = {
-                'Authorization': f'Bearer {token}'
+                'Authorization': f'Bearer {token_h}'
             }
 
             # request parameters
@@ -384,9 +414,9 @@ class c_sup(viewsets.ViewSet):
                     workbook = app.books[calc_file_path]
                 else:
                     try:
-                        workbook = app.books.open(calc_file_path, update_links=False)
+                        workbook = app.books.open(calc_file_path, update_links=False, read_only=True)
                     except FileNotFoundError:
-                        print("The source file for CM10 was not found.")
+                        print("The source file for c_sup was not found.")
                         # Handle the error appropriately, maybe return or exit
             #endregion Preparing Excel files
 
@@ -421,12 +451,9 @@ class c_sup(viewsets.ViewSet):
                 # Extend formulas in range O:AD
                 last_row = sheet2.range('O1').end('down').row
                 if last_row < max_row:
-                    xl_app = sheet2.book.app.api
-                    for col in range(15, 31):
-                        xl_app.Range(
-                            xl_app.Cells(last_row, col),
-                            xl_app.Cells(max_row, col)
-                        ).FillDown()
+                    source = sheet2.range((last_row, 15), (last_row, 30))
+                    target = sheet2.range((last_row, 15), (max_row, 30))
+                    source.autofill(target)
 
                 # Clear any extra rows beyond max_row
                 elif last_row > max_row:
@@ -482,6 +509,7 @@ class c_sup(viewsets.ViewSet):
                 workbook.save(f'C:\\Users\\eshraghi\\Documents\\esh\\share\\c_sup\\c_sup_{formatted_jalali_date}.xlsx')
 
             finally:
+                workbook.close()
                 app.quit()
 
             #region Database logging
@@ -504,7 +532,6 @@ class c_sup(viewsets.ViewSet):
                 # file_path=file_path if response.headers.get('Content-Type') != 'application/json' else None,
                 additional_info={'status_code': response.status_code},
                 execution_time=ext_duration
-                
             )
             #endregion  Database logging
 
