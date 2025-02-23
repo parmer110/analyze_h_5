@@ -7,23 +7,17 @@ import jdatetime
 import datetime
 import time
 from django.conf import settings
-from django.http import FileResponse
 from rest_framework import viewsets
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from django.http import HttpResponse
-from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-import openpyxl
 import xlwings as xw
 import pandas as pd
 from io import BytesIO
 from django.shortcuts import render
-# from selenium import webdriver
-# from selenium.webdriver.chrome.options import Options
 from concurrent.futures import ThreadPoolExecutor
 from playwright.sync_api import sync_playwright
-from bs4 import BeautifulSoup
+import threading
 from .serializers import SendCodeSerializer, LoginSerializer, AccountingCallLog
 from .models import RequestLog, Requests
 
@@ -63,191 +57,118 @@ class LoginViewSetHamkadeh(viewsets.ViewSet):
         return Response(serializer.errors, status=400)
 
 
-# class SendSMSCodeViewSet5040(viewsets.ViewSet):
-#     def create(self, request):
-#         serializer = SendCodeSerializer(data=request.data)
-#         if serializer.is_valid():
-#             response = requests.put('https://api.5040.me/api/auth/send-login-code', json=serializer.validated_data)
-#             log = RequestLog.objects.create(
-#                 request_name = 'Send SMS 5040',
-#                 username=serializer.validated_data['username'],
-#                 request_type='send_code',
-#                 request_data=serializer.validated_data,
-#                 response_data=response.json()
-#             )
-#             return Response(response.json())
-#         return Response(serializer.errors, status=400)
-
-class SendSMSCodeViewSet5040(viewsets.ViewSet):
-    def create(self, request):    
-        serializer = SendCodeSerializer(data=request.data)
-        if serializer.is_valid():
-            p = sync_playwright().start()
-            browser = p.chromium.launch(headless=True) #, args=['--auto-open-devtools-for-tabs']
-            page = browser.new_page()
+def run_playwright_for_login_5040(username, password):
+    with sync_playwright() as p:
+        with p.chromium.launch(headless=True) as browser:
+            context = browser.new_context()
+            page = context.new_page()
             page.goto('https://panel.5040.me/auth/login', timeout=60000)
-
-            # Fill out the login form
-            page.fill('input[name="login-username"]', serializer.validated_data['username'])
-            page.fill('input[name="password"]', serializer.validated_data['password'])
-            # Submit the form
+            page.fill('input[name="login-username"]', username)
+            page.fill('input[name="password"]', password)
             page.click('button:has-text("ارسال کد با پیامک")')
-
-            # Wait for navigation or some indication of login success
             page.wait_for_load_state('networkidle')
-
-            # Capture cookies
-            cookies_send_sms_5040 = page.context.cookies()
             
-            # Catch SMS authentication code
             sms_code = input("Enter the SMS code: ")
-
-            # Fill out the login form
             page.fill('input[name="login-code"]', sms_code)
-            # Submit the form
+            
             with page.expect_response(
-                lambda response: "api/auth/login" in response.url and response.status == 200
-            ) as response_info:
+                lambda response: "api/auth/login" in response.url and response.status == 200, timeout=60000
+            ):
                 page.click('button:has-text("ورود به سیستم")')
             
-            # Wait for navigation or some indication of login success
             page.wait_for_load_state('networkidle')
-
-            # login_response = response_info.value.json()
-
-            # Capture cookies
-            cookies_login_5040 = page.context.cookies()
-
-            # Close the browser
-            browser.close()
-
-            # for cookie in cookies_login_5040:
-            #     if cookie['name'] == "token":
-            #         request.session['token_5'] = cookie['value']
-            #     if cookie['name'] == "loginExpire":
-            #         request.session['loginExpire'] = cookie['value']
-            #     request.session['username_5'] = serializer.validated_data['username']
-            #     request.session['password_5'] = serializer.validated_data['password']
-
-            return Response(cookies_login_5040)
-
-        return Response(serializer.errors, status=400)
-
-
-# class LoginViewSet5040(viewsets.ViewSet):
-#     def create(self, request):
-#         serializer = LoginSerializer(data=request.data)
-#         if serializer.is_valid():
-#             response = requests.post('https://api.5040.me/api/auth/login', json=serializer.validated_data)
-#             log = RequestLog.objects.create(
-#                 request_name = 'login 5040',
-#                 username=serializer.validated_data['username'],
-#                 request_type='login',
-#                 request_data=serializer.validated_data,
-#                 response_data=response.json()
-#             )
-#             token_5 = response.json().get('token')
-#             print(response.cookies.get('loginExpire'))
-#             if token_5:
-#                 request.session['token_5'] = token_5
-#                 request.session['username_5'] = serializer.validated_data['username']
-#                 request.session['password_5'] = serializer.validated_data['password']
-#                 request.session['loginExpire'] = response.cookies.get('loginExpire')
-#            return Response(response.json())
-#         return Response(serializer.errors, status=400)
+            cookies = context.cookies("https://panel.5040.me")
+            return cookies
 
 class LoginViewSet5040(viewsets.ViewSet):
     def create(self, request):
-        serializer = LoginSerializer(data=request.data)
-        if serializer.is_valid():
-            # with sync_playwright() as p:
-            p = sync_playwright().start()
-            browser = p.chromium.launch(headless=False, args=['--auto-open-devtools-for-tabs'])
-            page = browser.new_page()
-            page.goto('https://panel.5040.me/auth/login')
-
-            # Fill out the login form
-            page.fill('input[name="login-code"]', serializer.validated_data['code'])
-            # Submit the form
-            page.click('button:has-text("ورود به سیستم")')
-
-            # page.fill('input[name="login-code"]', serializer.validated_data['code'])
-
-            # Wait for navigation or some indication of login success
-            page.wait_for_load_state('networkidle')
-
-            # Capture cookies
-            cookies = page.context.cookies()
-            response_body = page.content()
-
-            response_data = {
-                "body": response_body,
-                "cookies": cookies
-            }
-
-            # Close the browser
-            # browser.close()
-
-            # Extract relevant cookies
-            # for cookie in cookies:
-            #     if cookie['name'] == 'loginExpire':
-            #         request.session['loginExpire'] = cookie['value']
-            #     elif cookie['name'] == 'token':
-            #         request.session['token_5'] = cookie['value']
-
-            # Store other session data as needed
-            # request.session['username_5'] = serializer.validated_data['username']
-            # request.session['password_5'] = serializer.validated_data['password']
-
-            return Response(response_data)
-
-        return Response(serializer.errors, status=400)
+        serializer = SendCodeSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+        
+        with ThreadPoolExecutor() as executor:
+            future = executor.submit(
+                run_playwright_for_login_5040,
+                serializer.validated_data['username'],
+                serializer.validated_data['password']
+            )
+            cookies = future.result()
+        
+        for cookie in cookies:
+            if cookie.get('name') == "token":
+                request.session['token_5'] = cookie.get('value')
+            elif cookie.get('name') == "loginExpire":
+                request.session['loginExpire_5'] = cookie.get('value')
+        
+        request.session['username_5'] = serializer.validated_data['username']
+        # request.session['password_5'] = serializer.validated_data['password']
+        
+        return Response({
+            "message": "Login processed.",
+            "cookies": cookies
+        })
 
 class RefreshSessionViewSet5040(viewsets.ViewSet):
-
     @action(detail=False, methods=['get'], url_path='5/refresh')
     def refresh_5(self, request):
-    
-
         token_5 = request.session.get('token_5')
         loginExpire_5 = request.session.get('loginExpire_5')
-        
-        if not token_5 or loginExpire_5:
+
+        if not (token_5 and loginExpire_5):
             return Response({'error': 'توکن یافت نشد. ابتدا لاگین کنید.'}, status=401)
 
-        cookies = [
-            {'name': 'token', 'value': token_5, 'domain': 'panel.5040.me', 'path': '/'},
-            {'name': 'loginExpire', 'value': str(loginExpire_5), 'domain': 'panel.5040.me', 'path': '/'}
-        ]            
-
-        headers = {
-            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-            'accept-encoding': 'gzip, deflate, br, zstd',
-            'accept-language': 'en-US,en;q=0.9',
-            'cache-control': 'no-cache',
-            'pragma': 'no-cache',
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36'
-        }
-
         try:
-            # with sync_playwright() as p:
-            p = sync_playwright().start()
-            browser = p.chromium.launch(headless=False, args=['--auto-open-devtools-for-tabs'])
-            page = browser.new_page()
-            page.context.add_cookies(cookies)
-            page.set_extra_http_headers(headers)
-            page.goto('https://panel.5040.me/')
-            # page.wait_for_timeout(3000)
-            page.wait_for_load_state('networkidle')
-            login_form = page.query_selector('form.auth-login-form.mt-2')
-            content = page.content()
-            # browser.close()
-            if login_form:
-                return Response({'status': 'نیاز به لاگین مجدد', 'content': content}, status=401)
-            return Response({'status': 'صفحه با موفقیت رفرش شد', 'content': content}, status=200)
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context()
+
+                context.add_cookies([
+                    {'name': 'token', 'value': token_5, 'domain': 'panel.5040.me','path': '/',},
+                    {'name': 'loginExpire', 'value': loginExpire_5, 'domain': 'panel.5040.me', 'path': '/',}
+                ])
+                
+                page = context.new_page()
+                page.goto('https://panel.5040.me/', timeout=60000)
+                
+                page.wait_for_load_state('networkidle')
+                
+                login_form = page.query_selector('form.auth-login-form.mt-2')
+
+                if login_form:
+                    return Response({'status': 'نیاز به لاگین مجدد'}, status=401)
+                
+                return Response({'status': 'صفحه با موفقیت رفرش شد'}, status=200)
+        
         except Exception as e:
             return Response({'error': str(e)}, status=500)
-        
+
+
+class LogoutViewSet5040(viewsets.ViewSet):
+    def create(self, request):
+        token_5 = request.session.get('token_5')
+        loginExpire_5 = request.session.get('loginExpire_5')
+        if not token_5:
+            return Response({'error': 'لاگین نیستید.'}, status=401)
+        del request.session['token_5']
+
+        try:
+            url = 'https://api.5040.me/api/auth/logout'
+            headers = {
+                'Authorization': f'Bearer {token_5}',
+                'Origin': 'https://panel.5040.me',
+                'Referer': 'https://panel.5040.me/',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+                'Content-Length': '0',
+                'Accept': 'application/json, text/plain, */*',
+                'cookie': loginExpire_5
+            }
+
+            response = requests.post(url, headers=headers)
+            return Response(response.json(), status=response.status_code)
+
+        except requests.exceptions.RequestException as e:
+            return Response({'error': str(e)}, status=500)
+
 def run(request):
     req = Requests.objects.all()
     return render(request, "web_requests/index.html", {
