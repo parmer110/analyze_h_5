@@ -6,6 +6,8 @@ import base64
 import jdatetime
 import datetime
 import time
+import random
+import asyncio
 from django.conf import settings
 from rest_framework import viewsets
 from rest_framework.response import Response
@@ -17,6 +19,9 @@ from io import BytesIO
 from django.shortcuts import render
 from concurrent.futures import ThreadPoolExecutor
 from playwright.sync_api import sync_playwright
+from concurrent.futures import ThreadPoolExecutor
+from asgiref.sync import async_to_sync
+from channels.db import database_sync_to_async
 import threading
 from .serializers import SendCodeSerializer, LoginSerializer, AccountingCallLog
 from .models import RequestLog, Requests
@@ -68,7 +73,14 @@ def run_playwright_for_login_5040(username, password):
             page.click('button:has-text("ارسال کد با پیامک")')
             page.wait_for_load_state('networkidle')
             
-            sms_code = input("Enter the SMS code: ")
+            while True:
+                try:
+                    sms_code = input("Enter the SMS code: ")
+                    int(sms_code)
+                    break
+                except:
+                    pass                
+            
             page.fill('input[name="login-code"]', sms_code)
             
             with page.expect_response(
@@ -78,7 +90,47 @@ def run_playwright_for_login_5040(username, password):
             
             page.wait_for_load_state('networkidle')
             cookies = context.cookies("https://panel.5040.me")
-            return cookies
+            return cookies, sms_code
+
+################################### 5040 login handlation #####################################
+def schedule_refresh_5040(request):
+    random_minutes = random.randint(1, 3)
+    wait_seconds = random_minutes * 60
+    log = RequestLog.objects.create(
+        request_name="5040AuthRefreshing-NextLogin-Schedule",
+        username=request.session.get('username_5'),
+        request_type='',
+        response_data=None,
+        additional_info={'Schedule_time': wait_seconds},
+    )
+    threading.Timer(wait_seconds, refresh_request_5040(request)).start()
+
+def refresh_request_5040(request):
+    try:
+        headers = {
+            'Cookie': f'sessionid={request.COOKIES.get("sessionid")}',
+        }        
+        response = requests.get('http://192.168.134.10:8001/web_requests/5/refresh/', headers=headers)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        # Log the error or handle it in some way
+        log = RequestLog.objects.create(
+            request_name="5040AuthRefreshing-NextLogin",
+            username=request.session.get('username_5'),
+            request_type='POST',
+            response_data=None,
+            additional_info={'error': str(e)},
+        )
+        return
+
+    # Log the successful response
+    log = RequestLog.objects.create(
+        request_name="5040AuthRefreshing-NextLogin",
+        username=request.session.get('username'),
+        request_type='POST',
+        response_data=response.json() if response.headers.get('Content-Type') == 'application/json' else None,
+        additional_info={'status_code': response.status_code},
+    )
 
 class LoginViewSet5040(viewsets.ViewSet):
     def create(self, request):
@@ -92,63 +144,115 @@ class LoginViewSet5040(viewsets.ViewSet):
                 serializer.validated_data['username'],
                 serializer.validated_data['password']
             )
-            cookies = future.result()
-        
-        for cookie in cookies:
-            if cookie.get('name') == "token":
-                request.session['token_5'] = cookie.get('value')
-            elif cookie.get('name') == "loginExpire":
-                request.session['loginExpire_5'] = cookie.get('value')
-        
-        request.session['username_5'] = serializer.validated_data['username']
-        # request.session['password_5'] = serializer.validated_data['password']
-        
+            cookies, sms_code = future.result()
+
+        cookie_names = {"token": "token_5", "loginExpire": "loginExpire_5"}
+
+        login_status = all(name in [cookie['name'] for cookie in cookies] for name in cookie_names)
+
+        log = RequestLog.objects.create(
+            request_name = 'login 5040 + SMS preparation',
+            username=serializer.validated_data['username'],
+            request_type='login',
+            request_data={**serializer.validated_data, 'sms_code': sms_code},
+            response_data="Login Succed" if login_status else "Login failure"
+        )
+
+        if login_status:
+            for cookie in cookies:
+                name = cookie.get('name')
+                value = cookie.get('value')
+
+                if name is None or value is None:
+                    continue
+
+                if name in cookie_names:
+                    request.session[cookie_names[name]] =  cookie.get('value')
+            
+            request.session['username_5'] = serializer.validated_data['username']
+
+            schedule_refresh_5040(request)
+
+        else:
+            if 'loginExpire_5' in request.session:
+                del request.session['loginExpire_5']
+            if 'token_5' in request.session:
+                del request.session['token_5']
+            
+            return Response({
+                "message": "Login not processed!",
+                "cookies": cookies
+            })
+
         return Response({
             "message": "Login processed.",
             "cookies": cookies
         })
 
+################################### 5040 refresh keep auth handlation #####################################
+def run_playwright_for_refresh(token, loginExpire):
+    def blocking():
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context()
+            context.add_cookies([
+                {'name': 'token', 'value': token, 'domain': 'panel.5040.me', 'path': '/'},
+                {'name': 'loginExpire', 'value': loginExpire, 'domain': 'panel.5040.me', 'path': '/'},
+            ])
+            page = context.new_page()
+            page.goto('https://panel.5040.me/', timeout=60000)
+            page.wait_for_load_state('networkidle')
+            login_form = page.query_selector('form.auth-login-form.mt-2')
+            # content = page.content()
+            browser.close()
+            return login_form
+    return asyncio.to_thread(blocking)
+
+@database_sync_to_async
+def create_request_log(log_data):
+    return RequestLog.objects.create(**log_data)
+
 class RefreshSessionViewSet5040(viewsets.ViewSet):
     @action(detail=False, methods=['get'], url_path='5/refresh')
     def refresh_5(self, request):
-        token_5 = request.session.get('token_5')
-        loginExpire_5 = request.session.get('loginExpire_5')
+        return async_to_sync(self.refresh_5_async)(request)
 
-        if not (token_5 and loginExpire_5):
+    async def refresh_5_async(self, request):
+        token = request.session.get('token_5')
+        loginExpire = request.session.get('loginExpire_5')
+        if not (token and loginExpire):
             return Response({'error': 'توکن یافت نشد. ابتدا لاگین کنید.'}, status=401)
-
         try:
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
-                context = browser.new_context()
-
-                context.add_cookies([
-                    {'name': 'token', 'value': token_5, 'domain': 'panel.5040.me','path': '/',},
-                    {'name': 'loginExpire', 'value': loginExpire_5, 'domain': 'panel.5040.me', 'path': '/',}
-                ])
-                
-                page = context.new_page()
-                page.goto('https://panel.5040.me/', timeout=60000)
-                
-                page.wait_for_load_state('networkidle')
-                
-                login_form = page.query_selector('form.auth-login-form.mt-2')
-
-                if login_form:
-                    return Response({'status': 'نیاز به لاگین مجدد'}, status=401)
-                
-                return Response({'status': 'صفحه با موفقیت رفرش شد'}, status=200)
-        
+            login_form = await run_playwright_for_refresh(token, loginExpire)
+            if login_form:
+                await create_request_log({
+                    'request_name': '5040AuthRefreshing',
+                    'username': request.session.get('username_5'),
+                    'request_type': 'GET',
+                    'response_data': None,
+                    'additional_info': {'error': 'نیاز به لاگین مجدد'},
+                })
+                return Response({'status': 'نیاز به لاگین مجدد'}, status=401)
+            await create_request_log({
+                'request_name': '5040AuthRefreshing',
+                'username': request.session.get('username_5'),
+                'request_type': 'GET',
+                'response_data': None,
+                'additional_info': {'error': 'Refreshing موفق؛ اعتبار لاگین تمدید شد.'},
+            })
+            return Response({'status': 'صفحه با موفقیت رفرش شد'}, status=200)
         except Exception as e:
             return Response({'error': str(e)}, status=500)
 
-
+################################### 5040 Logout #####################################
 class LogoutViewSet5040(viewsets.ViewSet):
     def create(self, request):
         token_5 = request.session.get('token_5')
         loginExpire_5 = request.session.get('loginExpire_5')
         if not token_5:
             return Response({'error': 'لاگین نیستید.'}, status=401)
+        # For Developing step
         del request.session['token_5']
 
         try:
@@ -177,6 +281,7 @@ def run(request):
 
 
 ###########################################
+################################### Hamkadeh Requests #####################################
 # ده دقیقه میسکال مشاور
 class cm10(viewsets.ViewSet):
     def create(self, request):
@@ -373,7 +478,7 @@ class cm10(viewsets.ViewSet):
 
             log = RequestLog.objects.create(
                 request_name="cm10",
-                username=request.session.get('username'),
+                username=request.session.get('username_h'),
                 request_type='POST',
                 request_data=serializer.validated_data,
                 response_data=response_data if response.headers.get('Content-Type') == 'application/json' else None,
@@ -596,3 +701,6 @@ class c_sup(viewsets.ViewSet):
                 return Response(response.text, status=response.status_code)
     
 # endregion Consultant’s support functioning statistics
+
+
+################################### 5040 Requests #####################################

@@ -14,7 +14,7 @@ class RequestLog(models.Model):
     request_name = models.CharField(max_length=50, null=True)
     username = models.CharField(max_length=255)
     request_type = models.CharField(max_length=50)
-    request_data = models.JSONField()
+    request_data = models.JSONField(null=True)
     response_data = models.JSONField(blank=True, null=True)
     file_path = models.CharField(max_length=255, null=True, blank=True)
     timestamp = models.DateTimeField(auto_now_add=True)
