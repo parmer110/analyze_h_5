@@ -23,6 +23,7 @@ from concurrent.futures import ThreadPoolExecutor
 from asgiref.sync import async_to_sync
 from channels.db import database_sync_to_async
 import threading
+import schedule
 from .serializers import SendCodeSerializer, LoginSerializer, AccountingCallLog
 from .models import RequestLog, Requests
 
@@ -93,29 +94,22 @@ def run_playwright_for_login_5040(username, password):
             return cookies, sms_code
 
 ################################### 5040 login handlation #####################################
-def schedule_refresh_5040(request):
-    random_minutes = random.randint(1, 3)
-    wait_seconds = random_minutes * 60
-    log = RequestLog.objects.create(
-        request_name="5040AuthRefreshing-NextLogin-Schedule",
-        username=request.session.get('username_5'),
-        request_type='',
-        response_data=None,
-        additional_info={'Schedule_time': wait_seconds},
-    )
-    threading.Timer(wait_seconds, refresh_request_5040(request)).start()
-
-def refresh_request_5040(request):
+def schedule_refresh_5040(request, random_seconds):
     try:
-        headers = {
-            'Cookie': f'sessionid={request.COOKIES.get("sessionid")}',
-        }        
+        session_cookie = request.COOKIES.get("sessionid")
+        headers = {}
+        if session_cookie:
+                headers['Cookie'] = f"sessionid={session_cookie}"
         response = requests.get('http://192.168.134.10:8001/web_requests/5/refresh/', headers=headers)
-        response.raise_for_status()
+        
+        # response.raise_for_status()
+
+        print("Refresh successful.")
+
     except requests.exceptions.RequestException as e:
         # Log the error or handle it in some way
         log = RequestLog.objects.create(
-            request_name="5040AuthRefreshing-NextLogin",
+            request_name="5040AuthRefreshing",
             username=request.session.get('username_5'),
             request_type='POST',
             response_data=None,
@@ -125,23 +119,28 @@ def refresh_request_5040(request):
 
     # Log the successful response
     log = RequestLog.objects.create(
-        request_name="5040AuthRefreshing-NextLogin",
+        request_name="5040AuthRefreshing-Schedule",
         username=request.session.get('username'),
         request_type='POST',
         response_data=response.json() if response.headers.get('Content-Type') == 'application/json' else None,
-        additional_info={'status_code': response.status_code},
+        additional_info={'status_code': response.status_code, 'refresh_time': random_seconds},
     )
 
 class LoginViewSet5040(viewsets.ViewSet):
+
+    scheduled_jobs = {}
+
     def create(self, request):
         serializer = SendCodeSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=400)
         
+        username = serializer.validated_data['username']
+
         with ThreadPoolExecutor() as executor:
             future = executor.submit(
                 run_playwright_for_login_5040,
-                serializer.validated_data['username'],
+                username,
                 serializer.validated_data['password']
             )
             cookies, sms_code = future.result()
@@ -152,7 +151,7 @@ class LoginViewSet5040(viewsets.ViewSet):
 
         log = RequestLog.objects.create(
             request_name = 'login 5040 + SMS preparation',
-            username=serializer.validated_data['username'],
+            username=username,
             request_type='login',
             request_data={**serializer.validated_data, 'sms_code': sms_code},
             response_data="Login Succed" if login_status else "Login failure"
@@ -169,9 +168,21 @@ class LoginViewSet5040(viewsets.ViewSet):
                 if name in cookie_names:
                     request.session[cookie_names[name]] =  cookie.get('value')
             
-            request.session['username_5'] = serializer.validated_data['username']
+            request.session['username_5'] = username
 
-            schedule_refresh_5040(request)
+            random_seconds = random.randint(120, 300)
+
+            # schedule_refresh_5040(request, random_seconds)
+
+            # job = schedule.every(random_seconds).seconds.do(schedule_refresh_5040, request, random_seconds)
+            # LoginViewSet5040.scheduled_jobs[username] = job
+            
+            # session_cookie = request.COOKIES.get("sessionid")
+            # headers = {}
+            # if session_cookie:
+            #      headers['Cookie'] = f"sessionid={session_cookie}"
+            # response = requests.get('http://192.168.134.10:8001/web_requests/5/refresh/', headers=headers)
+
 
         else:
             if 'loginExpire_5' in request.session:
@@ -186,8 +197,38 @@ class LoginViewSet5040(viewsets.ViewSet):
 
         return Response({
             "message": "Login processed.",
-            "cookies": cookies
+            "cookies": cookies,
         })
+    @action(detail=False, methods=['post'], url_path='cancel_refresh')
+    def cancel_refresh(self, request):
+        serializer = SendCodeSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+        
+        username = serializer.validated_data['username']
+
+        if username in LoginViewSet5040.scheduled_jobs:
+            job = LoginViewSet5040.scheduled_jobs[username]
+            if schedule.get_jobs(job):
+                schedule.cancel_job(job)
+                # Log the successful response
+                log = RequestLog.objects.create(
+                    request_name="5040RefreshCancelation",
+                    username=username,
+                    request_type='POST',
+                    response_data={'Refress status': 'Succeed'}
+                )
+                return Response({"message": "Refresh canceled"})
+            else:
+                 return Response({"message": "No active refresh job to cancel"})
+        else:
+            log = RequestLog.objects.create(
+                request_name="5040RefreshCancelation",
+                username=serializer.validated_data['username'],
+                request_type='POST',
+                response_data={'Refress status':'Unsuccess'}
+            )
+            return Response({"message": "No refresh job to cancel"})
 
 ################################### 5040 refresh keep auth handlation #####################################
 def run_playwright_for_refresh(token, loginExpire):
@@ -223,6 +264,12 @@ class RefreshSessionViewSet5040(viewsets.ViewSet):
         loginExpire = request.session.get('loginExpire_5')
         if not (token and loginExpire):
             return Response({'error': 'توکن یافت نشد. ابتدا لاگین کنید.'}, status=401)
+
+        session_cookie = request.COOKIES.get("sessionid")
+        headers = {}
+        if session_cookie:
+                headers['Cookie'] = f"sessionid={session_cookie}"
+
         try:
             login_form = await run_playwright_for_refresh(token, loginExpire)
             if login_form:
@@ -239,7 +286,7 @@ class RefreshSessionViewSet5040(viewsets.ViewSet):
                 'username': request.session.get('username_5'),
                 'request_type': 'GET',
                 'response_data': None,
-                'additional_info': {'error': 'Refreshing موفق؛ اعتبار لاگین تمدید شد.'},
+                'additional_info': {'Result': 'Refreshing موفق؛ اعتبار لاگین تمدید شد.'},
             })
             return Response({'status': 'صفحه با موفقیت رفرش شد'}, status=200)
         except Exception as e:
@@ -562,6 +609,8 @@ class c_sup(viewsets.ViewSet):
 
             response = requests.post('https://api.hamkadeh.com/api/accounting/call-log/index', headers=headers, params=params)
 
+            print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
+            print(response.headers.get('Content-Type'))
             downloaded_df = pd.read_excel(BytesIO(response.content))
 
             max_row = len(downloaded_df) + 1
@@ -682,7 +731,7 @@ class c_sup(viewsets.ViewSet):
 
             log = RequestLog.objects.create(
                 request_name="c_sup",
-                username=request.session.get('username'),
+                username=request.session.get('username_h'),
                 request_type='POST',
                 request_data=serializer.validated_data,
                 response_data=response_data if response.headers.get('Content-Type') == 'application/json' else None,
