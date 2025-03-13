@@ -8,11 +8,12 @@ import datetime
 import time
 import random
 import asyncio
-from django.conf import settings
+import logging
+from django.utils import timezone
 from rest_framework import viewsets
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from django.views.decorators.csrf import csrf_exempt
+from rest_framework import status
 import xlwings as xw
 import pandas as pd
 from io import BytesIO
@@ -22,8 +23,9 @@ from playwright.sync_api import sync_playwright
 from concurrent.futures import ThreadPoolExecutor
 from asgiref.sync import async_to_sync
 from channels.db import database_sync_to_async
-import threading
-import schedule
+from django_q.tasks import schedule
+from django_q.models import Schedule
+from django.core.exceptions import ObjectDoesNotExist
 from .serializers import SendCodeSerializer, LoginSerializer, AccountingCallLog
 from .models import RequestLog, Requests
 
@@ -94,38 +96,6 @@ def run_playwright_for_login_5040(username, password):
             return cookies, sms_code
 
 ################################### 5040 login handlation #####################################
-def schedule_refresh_5040(request, random_seconds):
-    try:
-        session_cookie = request.COOKIES.get("sessionid")
-        headers = {}
-        if session_cookie:
-                headers['Cookie'] = f"sessionid={session_cookie}"
-        response = requests.get('http://192.168.134.10:8001/web_requests/5/refresh/', headers=headers)
-        
-        # response.raise_for_status()
-
-        print("Refresh successful.")
-
-    except requests.exceptions.RequestException as e:
-        # Log the error or handle it in some way
-        log = RequestLog.objects.create(
-            request_name="5040AuthRefreshing",
-            username=request.session.get('username_5'),
-            request_type='POST',
-            response_data=None,
-            additional_info={'error': str(e)},
-        )
-        return
-
-    # Log the successful response
-    log = RequestLog.objects.create(
-        request_name="5040AuthRefreshing-Schedule",
-        username=request.session.get('username'),
-        request_type='POST',
-        response_data=response.json() if response.headers.get('Content-Type') == 'application/json' else None,
-        additional_info={'status_code': response.status_code, 'refresh_time': random_seconds},
-    )
-
 class LoginViewSet5040(viewsets.ViewSet):
 
     scheduled_jobs = {}
@@ -170,20 +140,22 @@ class LoginViewSet5040(viewsets.ViewSet):
             
             request.session['username_5'] = username
 
-            random_seconds = random.randint(120, 300)
-
-            # schedule_refresh_5040(request, random_seconds)
-
-            # job = schedule.every(random_seconds).seconds.do(schedule_refresh_5040, request, random_seconds)
-            # LoginViewSet5040.scheduled_jobs[username] = job
+            random_seconds = random.randint(10, 30)
             
-            # session_cookie = request.COOKIES.get("sessionid")
-            # headers = {}
-            # if session_cookie:
-            #      headers['Cookie'] = f"sessionid={session_cookie}"
-            # response = requests.get('http://192.168.134.10:8001/web_requests/5/refresh/', headers=headers)
-
-
+            # Django-Q
+            try:
+                task = Schedule.objects.get(func='scheduler.tasks.web_request_5040_refresh')
+                task.stopped = False
+                task.next_run = timezone.now() + timezone.timedelta(minutes=20)
+                task.save()
+            except ObjectDoesNotExist:
+                schedule(
+                    'scheduler.tasks.web_request_5040_refresh',
+                    schedule_type='I',
+                    minutes=int(20),
+                    next_run = timezone.now() + timezone.timedelta(minutes=20),
+                    repeats=-1
+                )
         else:
             if 'loginExpire_5' in request.session:
                 del request.session['loginExpire_5']
@@ -192,43 +164,15 @@ class LoginViewSet5040(viewsets.ViewSet):
             
             return Response({
                 "message": "Login not processed!",
-                "cookies": cookies
-            })
+                "cookies": cookies,
+            },
+            status=status.HTTP_401_UNAUTHORIZED
+            )
 
         return Response({
             "message": "Login processed.",
             "cookies": cookies,
         })
-    @action(detail=False, methods=['post'], url_path='cancel_refresh')
-    def cancel_refresh(self, request):
-        serializer = SendCodeSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=400)
-        
-        username = serializer.validated_data['username']
-
-        if username in LoginViewSet5040.scheduled_jobs:
-            job = LoginViewSet5040.scheduled_jobs[username]
-            if schedule.get_jobs(job):
-                schedule.cancel_job(job)
-                # Log the successful response
-                log = RequestLog.objects.create(
-                    request_name="5040RefreshCancelation",
-                    username=username,
-                    request_type='POST',
-                    response_data={'Refress status': 'Succeed'}
-                )
-                return Response({"message": "Refresh canceled"})
-            else:
-                 return Response({"message": "No active refresh job to cancel"})
-        else:
-            log = RequestLog.objects.create(
-                request_name="5040RefreshCancelation",
-                username=serializer.validated_data['username'],
-                request_type='POST',
-                response_data={'Refress status':'Unsuccess'}
-            )
-            return Response({"message": "No refresh job to cancel"})
 
 ################################### 5040 refresh keep auth handlation #####################################
 def run_playwright_for_refresh(token, loginExpire):
@@ -254,6 +198,17 @@ def run_playwright_for_refresh(token, loginExpire):
 def create_request_log(log_data):
     return RequestLog.objects.create(**log_data)
 
+@database_sync_to_async
+def schedule_cancelation(task_name):
+    try:
+        task = Schedule.objects.get(func='scheduler.tasks.web_request_5040_refresh')
+        task.stopped = True
+        task.save()
+        # Schedule.objects.filter(func='scheduler.tasks.web_request_5040_refresh').delete()
+    except ObjectDoesNotExist:
+        task = None
+        print("There is no Scheduler refresh task before!")    
+
 class RefreshSessionViewSet5040(viewsets.ViewSet):
     @action(detail=False, methods=['get'], url_path='5/refresh')
     def refresh_5(self, request):
@@ -262,8 +217,9 @@ class RefreshSessionViewSet5040(viewsets.ViewSet):
     async def refresh_5_async(self, request):
         token = request.session.get('token_5')
         loginExpire = request.session.get('loginExpire_5')
+        # print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
         if not (token and loginExpire):
-            return Response({'error': 'توکن یافت نشد. ابتدا لاگین کنید.'}, status=401)
+            return Response({'error': 'توکن یافت نشد. ابتدا لاگین کنید.'}, status=408)
 
         session_cookie = request.COOKIES.get("sessionid")
         headers = {}
@@ -280,6 +236,7 @@ class RefreshSessionViewSet5040(viewsets.ViewSet):
                     'response_data': None,
                     'additional_info': {'error': 'نیاز به لاگین مجدد'},
                 })
+                await schedule_cancelation('your_app.tasks.web_request_5040_refresh')
                 return Response({'status': 'نیاز به لاگین مجدد'}, status=401)
             await create_request_log({
                 'request_name': '5040AuthRefreshing',
@@ -389,7 +346,14 @@ class cm10(viewsets.ViewSet):
             # Request simulation core
             response = requests.post('https://api.hamkadeh.com/api/accounting/call-log/index', headers=headers, params=params)
 
-            downloaded_df = pd.read_excel(BytesIO(response.content))
+            # print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
+            # print(response.headers.get('Content-Type'))
+
+            try:
+                downloaded_df = pd.read_excel(BytesIO(response.content))
+            except ValueError as e:
+                logging.error("Error reading downloaded Excel data: %s", e)
+                return Response({'issue':e, 'status':400})                
 
             max_row = len(downloaded_df) + 1
             
@@ -609,9 +573,11 @@ class c_sup(viewsets.ViewSet):
 
             response = requests.post('https://api.hamkadeh.com/api/accounting/call-log/index', headers=headers, params=params)
 
-            print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
-            print(response.headers.get('Content-Type'))
-            downloaded_df = pd.read_excel(BytesIO(response.content))
+            try:
+                downloaded_df = pd.read_excel(BytesIO(response.content))
+            except ValueError as e:
+                logging.error("Error reading Excel file: %s", e)
+                return Response({'issue':'Please log in before making a request.', 'status':400})
 
             max_row = len(downloaded_df) + 1
 
@@ -625,9 +591,6 @@ class c_sup(viewsets.ViewSet):
                         print("The source file for c_sup was not found.")
                         # Handle the error appropriately, maybe return or exit
             #endregion Preparing Excel files
-
-                # workbook.app.calculation = 'manual'
-
 
                 # region Manipulation, Mixing, Calculate
                 # Access the sheets

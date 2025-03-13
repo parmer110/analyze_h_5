@@ -1,6 +1,7 @@
 from pathlib import Path
 from decouple import config
 
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -18,8 +19,11 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'common',
+    # 'django_celery_beat',
+    'django_q',
     'rest_framework',
+    'rest_framework.authtoken',
+    'common',
     'web_requests',
     'excel_processing',
     'data_manipulation',
@@ -101,3 +105,37 @@ STATIC_URL = 'static/'
 STATICFILES_DIRS = [BASE_DIR / "web_requests/static"]
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Celery
+# CELERY_BROKER_URL = config('BROKER_URL')
+CELERY_BROKER_URL = 'amqp://parmer_110:Aa4812@@192.168.134.44:5672/cm10_vhost'
+CELERY_RESULT_BACKEND = 'rpc://'
+CELERY_WORKER_CONCURRENCY = 4
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'Asia/Tehran'
+
+
+# Django-Q
+Q_CLUSTER = {
+    'name': 'DjangoQ',
+    'workers': 4,
+    'timeout': 90,
+    'retry': 120,
+    'queue_limit': 50,
+    'bulk': 10,
+    'orm': 'default',
+    'redis': {
+        'host': 'localhost',
+        'port': 6379,
+        'db': 0,
+    },
+    'sync': False,
+    'signer': {
+        'class': 'django.core.signing.TimestampSigner',
+        'key': config('SECRET_KEY'),
+        'salt': 'django-q-standalone'
+    },
+    'catch_up': False
+}
