@@ -1,4 +1,5 @@
 from django.db import models
+from common.models import User
 
 
 class Requests (models.Model):
@@ -20,3 +21,11 @@ class RequestLog(models.Model):
     timestamp = models.DateTimeField(auto_now_add=True)
     additional_info = models.JSONField(null=True, blank=True)
     execution_time = models.DurationField(null=True)
+
+class WebTokens(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, null=True)
+    name = models.CharField(max_length=50, unique=True)
+    value = models.CharField(max_length=200, null=True)
+
+    class Meta:
+        unique_together = ('user', 'name')

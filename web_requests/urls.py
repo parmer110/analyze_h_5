@@ -20,5 +20,5 @@ router.register(r'5/logout', LogoutViewSet5040, basename='logout-5')
 urlpatterns = [
     path('', include(router.urls)),
     path('run/', run, name="run_request"),
-     path('5/refresh/', RefreshSessionViewSet5040.as_view({'get': 'refresh_5'})),
+    path('5/refresh/', RefreshSessionViewSet5040.as_view({'get': 'refresh_5'})),
 ]
