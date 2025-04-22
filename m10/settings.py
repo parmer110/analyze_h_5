@@ -100,9 +100,11 @@ USE_TZ = True
 
 APPEND_SLASH = False
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 
 STATICFILES_DIRS = [BASE_DIR / "web_requests/static"]
+
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -139,3 +141,5 @@ Q_CLUSTER = {
     },
     'catch_up': False
 }
+
+ASGI_APPLICATION = 'm10.asgi.application'

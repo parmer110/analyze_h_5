@@ -11,7 +11,7 @@ def web_request_5040_refresh(**kwargs):
     loginExpire_5 = inner_kwargs.get('loginExpire_5')
 
     headers = {'X-Internal-Request': 'true'}
-    url = f"http://192.168.134.10:8001/web_requests/5/refresh/?username={username}&token_5={token_5}&loginExpire_5={loginExpire_5}"
+    url = f"http://192.168.134.10:8002/web_requests/5/refresh/?username={username}&token_5={token_5}&loginExpire_5={loginExpire_5}"
     try:
         response = requests.get(url, headers=headers, timeout=300)
         logger.info(f"Request sent. Status code: {response.status_code}")

@@ -176,14 +176,19 @@ class LoginViewSet5040(viewsets.ViewSet):
             interval = 2
 
             tasks = Schedule.objects.filter(func='scheduler.tasks.web_request_5040_refresh')
+            print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
             found_user = False
             for task in tasks:
                 kwargs_dict = ast.literal_eval(task.kwargs)
                 inner_kwargs = kwargs_dict.get('kwargs', {})
+                print("2↓↓↓↓↓↓↓↓↓↓↓")
+                print(inner_kwargs)
                 if inner_kwargs.get('username') == user.username:
+                    print("3↓↓↓↓↓↓↓↓↓↓↓")
                     if found_user:
                         logger.error(f"(DUPLICATED!) Error schedule task. user: {user.username}, taskid: {task.id}")
                     else:
+                        print("4↓↓↓↓↓↓↓↓↓↓↓")
                         kwargs.update({'username': user.username})
                         task.stopped = False
                         task.next_run = timezone.now() + timezone.timedelta(minutes=interval)
@@ -191,6 +196,7 @@ class LoginViewSet5040(viewsets.ViewSet):
                         task.save()
                         found_user = True
             if not found_user:
+                print("5↓↓↓↓↓↓↓↓↓↓↓")
                 kwargs['username'] = user.username
                 schedule(
                     'scheduler.tasks.web_request_5040_refresh',
@@ -228,7 +234,7 @@ class LoginViewSet5040(viewsets.ViewSet):
         })
 
 ################################### 5040 refresh keep auth handlation #####################################
-def run_playwright_for_refresh(token, loginExpire):
+async def run_playwright_for_refresh(token, loginExpire):
     def blocking():
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
@@ -246,7 +252,7 @@ def run_playwright_for_refresh(token, loginExpire):
             # content = page.content()
             browser.close()
             return login_form, cookies
-    return asyncio.to_thread(blocking)
+    return await asyncio.to_thread(blocking)
 
 @database_sync_to_async
 def create_request_log(log_data):
@@ -269,25 +275,24 @@ class RefreshSessionViewSet5040(viewsets.ViewSet):
         username = request.query_params.get('username')
         token_5 = request.query_params.get('token_5')
         loginExpire_5 = request.query_params.get('loginExpire_5')
-        return async_to_sync(self.refresh_5_async)(request, username, token_5, loginExpire_5)
+        result = async_to_sync(self.refresh_5_async)(request, username, token_5, loginExpire_5)
+        return result
 
     async def refresh_5_async(self, request, username, token_5, loginExpire_5):
         # User not exist error handling
         try:
             user = await sync_to_async(User.objects.get)(username=username)
         except User.DoesNotExist:
-            log = RequestLog.objects.create(
-                request_name = '5040AuthRefreshing',
-                username=username,
-                request_type='GET',
-                request_data={'username': username},
-                response_data="User not exist!"
-            )
+            await create_request_log({
+                'request_name': '5040AuthRefreshing',
+                'username': username,
+                'request_type': 'GET',
+                'request_data': {'username': username},
+                'response_data': "User not exist!"
+            })
             return Response({
                 "message": f"User {username} not exists!",
-            },
-            status=status.HTTP_401_UNAUTHORIZED
-            )
+            }, status=status.HTTP_401_UNAUTHORIZED)
 
         # is_internal = request.headers.get('X-Internal-Request') == 'true'
 
@@ -316,7 +321,7 @@ class RefreshSessionViewSet5040(viewsets.ViewSet):
                 status=status.HTTP_401_UNAUTHORIZED
                 )
         if not (token and loginExpire):
-            return Response({'error': 'توکن یافت نشد. ابتدا لاگین کنید.'}, status=401)
+            return Response({'error': 'توکن یافت نشد.'}, status=401)
 
         session_cookie = request.COOKIES.get("sessionid")
         headers = {}
@@ -354,9 +359,9 @@ class RefreshSessionViewSet5040(viewsets.ViewSet):
                     if db_cookies:
                         try:
                         # Database cookies prepare
-                            token = WebTokens.objects.get(user=user, name=cookie_names[name])
+                            token = await sync_to_async(WebTokens.objects.get)(user=user, name=cookie_names[name])
                             token.value = value
-                            token.save()
+                            await sync_to_async(token.save)()
                         
                         except WebTokens.DoesNotExist:
                             await create_request_log({
@@ -371,18 +376,16 @@ class RefreshSessionViewSet5040(viewsets.ViewSet):
 
             # Django-Q
             interval = random.randint(10, 30)
-
-            tasks = Schedule.objects.filter(func='scheduler.tasks.web_request_5040_refresh')
+            tasks = await sync_to_async(list)(Schedule.objects.filter(func='scheduler.tasks.web_request_5040_refresh'))
             found_user = False
             for task in tasks:
                 kwargs_dict = ast.literal_eval(task.kwargs)
-                inner_kwargs = kwargs_dict.get('kwargs', {})
-                if inner_kwargs.get('username') == user.username:
+                if kwargs_dict.get('username') == user.username:
                     kwargs.update({'username': user.username})
                     task.stopped = False
                     task.next_run = timezone.now() + timezone.timedelta(minutes=interval)
                     task.kwargs=kwargs
-                    task.save()
+                    await sync_to_async(task.save, thread_sensitive=True)()
                     found_user = True
                     break
             if not found_user:

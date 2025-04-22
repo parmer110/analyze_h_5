@@ -8,9 +8,12 @@ https://docs.djangoproject.com/en/5.1/howto/deployment/asgi/
 """
 
 import os
-
+import asyncio
+from asyncio import WindowsProactorEventLoopPolicy
 from django.core.asgi import get_asgi_application
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'm10.settings')
 
 application = get_asgi_application()
+
+asyncio.set_event_loop_policy(WindowsProactorEventLoopPolicy())
