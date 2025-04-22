@@ -22,7 +22,6 @@ from io import BytesIO
 from django.shortcuts import render
 from concurrent.futures import ThreadPoolExecutor
 from playwright.sync_api import sync_playwright
-from concurrent.futures import ThreadPoolExecutor
 from asgiref.sync import sync_to_async
 from asgiref.sync import async_to_sync
 from channels.db import database_sync_to_async
@@ -70,173 +69,134 @@ class LoginViewSetHamkadeh(viewsets.ViewSet):
             return Response(response.json())
         return Response(serializer.errors, status=400)
 
+def schedule_refresh_job(user, kwargs, interval_minutes=None):
+    """
+    Create or update a Django-Q schedule for the given user.
+    Uses a unique name per user to avoid duplicates.
+    If interval_minutes is None, picks a random interval between 10 and 30.
+    """
+    task_name = f"web_request_5040_refresh_{user.username}"
+    now = timezone.now()
+    # Use random interval if not provided
+    minutes = interval_minutes if interval_minutes is not None else random.randint(10, 30)
+    try:
+        sch = Schedule.objects.get(name=task_name)
+        sch.next_run = now + timezone.timedelta(minutes=minutes)
+        sch.stopped = False
+        sch.kwargs = kwargs
+        sch.save()
+    except Schedule.DoesNotExist:
+        schedule(
+            'scheduler.tasks.web_request_5040_refresh',
+            name=task_name,
+            schedule_type='I',
+            minutes=minutes,
+            next_run=now + timezone.timedelta(minutes=minutes),
+            repeats=1,
+            kwargs=kwargs
+        )
 
 def run_playwright_for_login_5040(username, password):
+    """
+    Uses Playwright to perform login on panel.5040.me and prompts for SMS code interactively.
+    Returns cookies and the SMS code entered by the user.
+    """
     with sync_playwright() as p:
-        with p.chromium.launch(headless=True) as browser:
-            context = browser.new_context()
-            page = context.new_page()
-            page.goto('https://panel.5040.me/auth/login', timeout=60000)
-            page.fill('input[name="login-username"]', username)
-            page.fill('input[name="password"]', password)
-            page.click('button:has-text("ارسال کد با پیامک")')
-            page.wait_for_load_state('networkidle')
-            
-            while True:
-                try:
-                    sms_code = input("Enter the SMS code: ")
-                    int(sms_code)
-                    break
-                except:
-                    pass                
-            
-            page.fill('input[name="login-code"]', sms_code)
-            
-            with page.expect_response(
-                lambda response: "api/auth/login" in response.url and response.status == 200, timeout=60000
-            ):
-                page.click('button:has-text("ورود به سیستم")')
-            
-            page.wait_for_load_state('networkidle')
-            cookies = context.cookies("https://panel.5040.me")
-            return cookies, sms_code
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context()
+        page = context.new_page()
+        page.goto('https://panel.5040.me/auth/login', timeout=60000)
+        page.fill('input[name="login-username"]', username)
+        page.fill('input[name="password"]', password)
+        page.click('button:has-text("ارسال کد با پیامک")')
+        page.wait_for_load_state('networkidle')
 
-################################### 5040 login handlation #####################################
+        sms_code = None
+        while not sms_code:
+            code = input("Enter the SMS code: ")
+            if code.isdigit():
+                sms_code = code
+
+        page.fill('input[name="login-code"]', sms_code)
+        with page.expect_response(
+            lambda resp: "api/auth/login" in resp.url and resp.status == 200,
+            timeout=60000
+        ):
+            page.click('button:has-text("ورود به سیستم")')
+
+        page.wait_for_load_state('networkidle')
+        cookies = context.cookies('https://panel.5040.me')
+        browser.close()
+        return cookies, sms_code
+
+
 class LoginViewSet5040(viewsets.ViewSet):
-
-    scheduled_jobs = {}
-
     def create(self, request):
         serializer = SendCodeSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=400)
-        
+        serializer.is_valid(raise_exception=True)
         username = serializer.validated_data['username']
         password = serializer.validated_data['password']
 
-        # User not exist error handling
         try:
             user = User.objects.get(username=username)
         except User.DoesNotExist:
-            log = RequestLog.objects.create(
-                request_name = 'login 5040 + SMS preparation',
-                username=username,
-                request_type='login',
-                request_data={**serializer.validated_data, 'sms_code': sms_code},
-                response_data="Login Succed" if login_status else "Login failure"
-            )
-            return Response({
-                "message": f"User {username} not exists!",
-            },
-            status=status.HTTP_401_UNAUTHORIZED
-            )
+            return Response({'message': f"User {username} not exists!"}, status=status.HTTP_401_UNAUTHORIZED)
 
+        # Run login process
         with ThreadPoolExecutor() as executor:
-            future = executor.submit(
-                run_playwright_for_login_5040,
-                username,
-                password
-            )
-            cookies, sms_code = future.result()
+            cookies, sms_code = executor.submit(run_playwright_for_login_5040, username, password).result()
 
-        cookie_names = {"token": "token_5", "loginExpire": "loginExpire_5"}
+        cookie_map = {'token': 'token_5', 'loginExpire': 'loginExpire_5'}
+        login_ok = all(name in [c['name'] for c in cookies] for name in cookie_map)
 
-        login_status = all(name in [cookie['name'] for cookie in cookies] for name in cookie_names)
-
-        log = RequestLog.objects.create(
-            request_name = 'login 5040 + SMS preparation',
+        # Log the attempt
+        RequestLog.objects.create(
+            request_name='login_5040',
             username=username,
             request_type='login',
             request_data={**serializer.validated_data, 'sms_code': sms_code},
-            response_data="Login Succeed" if login_status else "Login failure"
+            response_data="Login Succeed" if login_ok else "Login Failure"
         )
 
-        # Login successfull
+        if not login_ok:
+            # Only clear 5040 tokens
+            WebTokens.objects.filter(
+                user=user,
+                name__in=['token_5', 'loginExpire_5']
+            ).update(value=None)
+            return Response({'message': 'Login failed', 'cookies': cookies}, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Save tokens
         kwargs = {}
-        if login_status:
-            # Save cookies in Database
-            for cookie in cookies:
-                name = cookie.get('name')
-                value = cookie.get('value')
-
-                if name is None or value is None:
-                    continue
-
-                kwargs[cookie_names[name]] = value
-
-                try:
-                    token = WebTokens.objects.get(user=user, name=cookie_names[name])
-                    token.value = value
-                    token.save()
-                except WebTokens.DoesNotExist:
-                    WebTokens.objects.create(user=user, name=cookie_names[name], value=value)
-
-            # Django-Q (Scheduling task)
-            interval = random.randint(10, 30)
-            interval = 2
-
-            tasks = Schedule.objects.filter(func='scheduler.tasks.web_request_5040_refresh')
-            print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
-            found_user = False
-            for task in tasks:
-                kwargs_dict = ast.literal_eval(task.kwargs)
-                inner_kwargs = kwargs_dict.get('kwargs', {})
-                print("2↓↓↓↓↓↓↓↓↓↓↓")
-                print(inner_kwargs)
-                if inner_kwargs.get('username') == user.username:
-                    print("3↓↓↓↓↓↓↓↓↓↓↓")
-                    if found_user:
-                        logger.error(f"(DUPLICATED!) Error schedule task. user: {user.username}, taskid: {task.id}")
-                    else:
-                        print("4↓↓↓↓↓↓↓↓↓↓↓")
-                        kwargs.update({'username': user.username})
-                        task.stopped = False
-                        task.next_run = timezone.now() + timezone.timedelta(minutes=interval)
-                        task.kwargs=kwargs
-                        task.save()
-                        found_user = True
-            if not found_user:
-                print("5↓↓↓↓↓↓↓↓↓↓↓")
-                kwargs['username'] = user.username
-                schedule(
-                    'scheduler.tasks.web_request_5040_refresh',
-                    schedule_type='I',
-                    minutes=int(interval),
-                    next_run = timezone.now() + timezone.timedelta(minutes=interval),
-                    repeats=1,
-                    kwargs=kwargs
-                )
-        # Login unsuccess
-        else:
-            for cookie in cookies:
-                name = cookie.get('name')
-                value = cookie.get('value')
-
-                if name is None or value is None:
-                    continue
-
-                try:
-                    token = WebTokens.objects.get(user=user, name=cookie_names[name])
-                    token.value = None
-                    token.save()
-                except WebTokens.DoesNotExist:
-                    pass
-            return Response({
-                "message": "Login not processed!",
-                "cookies": cookies,
-            },
-            status=status.HTTP_401_UNAUTHORIZED
+        for c in cookies:
+            name = c.get('name')
+            value = c.get('value')
+            key = cookie_map.get(name)
+            if not key:
+                continue
+            kwargs[key] = value
+            WebTokens.objects.update_or_create(
+                user=user,
+                name=key,
+                defaults={'value': value}
             )
 
-        return Response({
-            "message": "Login processed.",
-            "cookies": cookies,
-        })
+        # Schedule or update refreshing job
+        schedule_refresh_job(user, kwargs)
+        return Response({'message': 'Login successful', 'cookies': cookies})
 
-################################### 5040 refresh keep auth handlation #####################################
+
+def schedule_cancelation(task_name):
+    try:
+        task = Schedule.objects.get(name=task_name)
+        task.stopped = True
+        task.save()
+    except Schedule.DoesNotExist:
+        pass
+
+
 async def run_playwright_for_refresh(token, loginExpire):
-    def blocking():
-        from playwright.sync_api import sync_playwright
+    def _sync_refresh():
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             context = browser.new_context()
@@ -247,168 +207,58 @@ async def run_playwright_for_refresh(token, loginExpire):
             page = context.new_page()
             page.goto('https://panel.5040.me/', timeout=60000)
             page.wait_for_load_state('networkidle')
-            cookies = context.cookies("https://panel.5040.me")
             login_form = page.query_selector('form.auth-login-form.mt-2')
-            # content = page.content()
+            cookies = context.cookies('https://panel.5040.me')
             browser.close()
             return login_form, cookies
-    return await asyncio.to_thread(blocking)
+    return await asyncio.to_thread(_sync_refresh)
 
-@database_sync_to_async
-def create_request_log(log_data):
-    return RequestLog.objects.create(**log_data)
-
-@database_sync_to_async
-def schedule_cancelation(task_name):
-    try:
-        task = Schedule.objects.get(func='scheduler.tasks.web_request_5040_refresh')
-        task.stopped = True
-        task.save()
-        # Schedule.objects.filter(func='scheduler.tasks.web_request_5040_refresh').delete()
-    except ObjectDoesNotExist:
-        task = None
-        print("There is no Scheduler refresh task before!")    
 
 class RefreshSessionViewSet5040(viewsets.ViewSet):
     @action(detail=False, methods=['get'], url_path='5/refresh')
     def refresh_5(self, request):
         username = request.query_params.get('username')
-        token_5 = request.query_params.get('token_5')
-        loginExpire_5 = request.query_params.get('loginExpire_5')
-        result = async_to_sync(self.refresh_5_async)(request, username, token_5, loginExpire_5)
-        return result
+        token = request.query_params.get('token_5')
+        loginExpire = request.query_params.get('loginExpire_5')
+        return async_to_sync(self.refresh_5_async)(request, username, token, loginExpire)
 
-    async def refresh_5_async(self, request, username, token_5, loginExpire_5):
-        # User not exist error handling
+    async def refresh_5_async(self, request, username, token, loginExpire):
         try:
             user = await sync_to_async(User.objects.get)(username=username)
         except User.DoesNotExist:
-            await create_request_log({
-                'request_name': '5040AuthRefreshing',
-                'username': username,
-                'request_type': 'GET',
-                'request_data': {'username': username},
-                'response_data': "User not exist!"
-            })
-            return Response({
-                "message": f"User {username} not exists!",
-            }, status=status.HTTP_401_UNAUTHORIZED)
+            return Response({'message': 'User not found'}, status=status.HTTP_401_UNAUTHORIZED)
 
-        # is_internal = request.headers.get('X-Internal-Request') == 'true'
-
-        if token_5 and loginExpire_5:
-            db_cookies = False
-            token = token_5
-            loginExpire = loginExpire_5
-        else:
-            db_cookies = True
+        # If tokens not in query, load from DB
+        if not token or not loginExpire:
             try:
-                token = await sync_to_async(WebTokens.objects.get)(user=user, name='token_5')
-                token = token.value
-                loginExpire = await sync_to_async(WebTokens.objects.get)(user=user, name='loginExpire_5')
-                loginExpire = loginExpire.value
+                token = (await sync_to_async(WebTokens.objects.get)(user=user, name='token_5')).value
+                loginExpire = (await sync_to_async(WebTokens.objects.get)(user=user, name='loginExpire_5')).value
             except WebTokens.DoesNotExist:
-                log = await sync_to_async (RequestLog.objects.create)(
-                    request_name = '5040AuthRefreshing',
-                    username=username,
-                    request_type='GET',
-                    request_data={'username': user.username},
-                    response_data="Error in token or loginExpire existance in database!"
-                )
-                return Response({
-                    "message": "token or loginExpire not exist!",
-                },
-                status=status.HTTP_401_UNAUTHORIZED
-                )
-        if not (token and loginExpire):
-            return Response({'error': 'توکن یافت نشد.'}, status=401)
+                return Response({'message': 'Tokens missing'}, status=status.HTTP_401_UNAUTHORIZED)
 
-        session_cookie = request.COOKIES.get("sessionid")
-        headers = {}
-        if session_cookie:
-                headers['Cookie'] = f"sessionid={session_cookie}"
+        login_form, cookies = await run_playwright_for_refresh(token, loginExpire)
+        if login_form:
+            # expired, cancel schedule
+            task_name = f"web_request_5040_refresh_{user.username}"
+            schedule_cancelation(task_name)
+            return Response({'status': 'Session expired; please login again.'}, status=402)
 
-        try:
-            login_form, cookies = await run_playwright_for_refresh(token, loginExpire)
-            # Login form visible in page simulation means login expire
-            if login_form:
-                await create_request_log({
-                    'request_name': '5040AuthRefreshing',
-                    'username': user.username,
-                    'request_type': 'GET',
-                    'response_data': None,
-                    'additional_info': {'error': 'کاربر اعتبار ندارد. نیاز به لاگین مجدد.'},
-                })
-                await schedule_cancelation('your_app.tasks.web_request_5040_refresh')
-                return Response({'status': 'کاربر اعتبار ندارد. نیاز به لاگین مجدد.'}, status=402)
-            
-            cookie_names = {"token": "token_5", "loginExpire": "loginExpire_5"}
-            login_status = all(name in [cookie['name'] for cookie in cookies] for name in cookie_names)
+        # Update tokens in DB
+        cookie_map = {'token': 'token_5', 'loginExpire': 'loginExpire_5'}
+        kwargs = {}
+        for c in cookies:
+            key = cookie_map.get(c['name'])
+            if key:
+                kwargs[key] = c['value']
+                await sync_to_async(
+                    WebTokens.objects.filter(user=user, name=key).update
+                )(value=c['value'])
 
-            kwargs = {}
-            if login_status:
-                for cookie in cookies:
-                    name = cookie.get('name')
-                    value = cookie.get('value')
+        # Reschedule next refresh
+        schedule_refresh_job(user, kwargs)
+        return Response({'status': 'Refreshed successfully'})
 
-                    if name is None or value is None:
-                        continue
 
-                    kwargs[cookie_names[name]] = value
-
-                    if db_cookies:
-                        try:
-                        # Database cookies prepare
-                            token = await sync_to_async(WebTokens.objects.get)(user=user, name=cookie_names[name])
-                            token.value = value
-                            await sync_to_async(token.save)()
-                        
-                        except WebTokens.DoesNotExist:
-                            await create_request_log({
-                                'request_name': '5040AuthRefreshing',
-                                'username': user.username,
-                                'request_type': 'GET',
-                                'response_data': None,
-                                'additional_info': {'error': 'توکن‌ها در پایگاه‌داده ذخیره نشدند. خطای پایگاه داده. رفرش متوقف شد.'},
-                            })
-                            await schedule_cancelation('your_app.tasks.web_request_5040_refresh')
-                            return Response({'status': 'توکن‌ها در پایگاه‌داده ذخیره نشدند. خطای پایگاه داده. رفرش متوقف شد.'}, status=403)
-
-            # Django-Q
-            interval = random.randint(10, 30)
-            tasks = await sync_to_async(list)(Schedule.objects.filter(func='scheduler.tasks.web_request_5040_refresh'))
-            found_user = False
-            for task in tasks:
-                kwargs_dict = ast.literal_eval(task.kwargs)
-                if kwargs_dict.get('username') == user.username:
-                    kwargs.update({'username': user.username})
-                    task.stopped = False
-                    task.next_run = timezone.now() + timezone.timedelta(minutes=interval)
-                    task.kwargs=kwargs
-                    await sync_to_async(task.save, thread_sensitive=True)()
-                    found_user = True
-                    break
-            if not found_user:
-                await create_request_log({
-                    'request_name': '5040AuthRefreshing',
-                    'username': user.username,
-                    'request_type': 'GET',
-                    'response_data': None,
-                    'additional_info': {'Result': 'Refreshing اشکال!؛ اعتبار لاگین تمدید شد ولی زمان‌بندی رفرش یافت نشد.'},
-                })
-                return Response({'status': 'صفحه با موفقیت رفرش شد ولی زمان‌بندی تکرار رفرش یافت نشد!'}, status=404)
-            await create_request_log({
-                'request_name': '5040AuthRefreshing',
-                'username': user.username,
-                'request_type': 'GET',
-                'response_data': None,
-                'additional_info': {'Result': 'Refreshing موفق؛ اعتبار لاگین تمدید شد.'},
-            })
-            return Response({'status': 'صفحه با موفقیت رفرش شد'}, status=200)
-        except Exception as e:
-            return Response({'error': str(e)}, status=500)
-
-################################### 5040 Logout #####################################
 class LogoutViewSet5040(viewsets.ViewSet):
     def create(self, request):
         token_5 = request.session.get('token_5')
