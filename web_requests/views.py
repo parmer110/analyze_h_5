@@ -96,6 +96,34 @@ def schedule_refresh_job(user, kwargs, interval_minutes=None):
             kwargs=kwargs
         )
 
+def schedule_refresh_job(user, kwargs, interval_minutes=None):
+    """
+    Create or update a Django-Q schedule for the given user.
+    Uses a unique name per user to avoid duplicates.
+    If interval_minutes is None, picks a random interval between 10 and 30.
+    """
+    task_name = f"web_request_5040_refresh_{user.username}"
+    now = timezone.now()
+    # Use random interval if not provided
+    minutes = interval_minutes if interval_minutes is not None else random.randint(10, 30)
+    try:
+        sch = Schedule.objects.get(name=task_name)
+        sch.next_run = now + timezone.timedelta(minutes=minutes)
+        sch.stopped = False
+        sch.kwargs = kwargs
+        sch.save()
+    except Schedule.DoesNotExist:
+        schedule(
+            'scheduler.tasks.web_request_5040_refresh',
+            name=task_name,
+            schedule_type='I',
+            minutes=minutes,
+            next_run=now + timezone.timedelta(minutes=minutes),
+            repeats=1,
+            kwargs=kwargs
+        )
+
+
 def run_playwright_for_login_5040(username, password):
     """
     Uses Playwright to perform login on panel.5040.me and prompts for SMS code interactively.
