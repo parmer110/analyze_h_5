@@ -4,18 +4,59 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def web_request_5040_refresh(**kwargs):
-    inner_kwargs = kwargs.get('kwargs', {})
-    username = inner_kwargs.get('username')
-    token_5 = inner_kwargs.get('token_5')
-    loginExpire_5 = inner_kwargs.get('loginExpire_5')
+def web_request_5040_refresh(username=None, token_5=None, loginExpire_5=None, **kwargs):
+    """
+    Scheduled task to call the RefreshSessionViewSet5040 view
+    for refreshing the 5040 login session.
+    Handles both direct parameters and legacy nested structure.
+    """
+    # Recover parameters from direct arguments or flat kwargs
+    if username is None:
+        username = kwargs.get('username')
+    if token_5 is None:
+        token_5 = kwargs.get('token_5')
+    if loginExpire_5 is None:
+        loginExpire_5 = kwargs.get('loginExpire_5')
 
+    # Handle legacy nested 'kwargs' key if present
+    nested = kwargs.get('kwargs') if isinstance(kwargs.get('kwargs'), dict) else None
+    if nested:
+        username = username or nested.get('username')
+        token_5 = token_5 or nested.get('token_5')
+        loginExpire_5 = loginExpire_5 or nested.get('loginExpire_5')
+
+    # Validate required parameters
+    if not (username and token_5 and loginExpire_5):
+        logger.error(
+            "Missing parameters for web_request_5040_refresh: %s", 
+            {'username': username, 'token_5': token_5, 'loginExpire_5': loginExpire_5}
+        )
+        return
+
+    # Construct internal request URL
+    url = (
+        f"http://192.168.134.10:8002/web_requests/5/refresh/"
+        f"?username={username}&token_5={token_5}&loginExpire_5={loginExpire_5}"
+    )
     headers = {'X-Internal-Request': 'true'}
-    url = f"http://192.168.134.10:8002/web_requests/5/refresh/?username={username}&token_5={token_5}&loginExpire_5={loginExpire_5}"
+
     try:
         response = requests.get(url, headers=headers, timeout=300)
-        logger.info(f"Request sent. Status code: {response.status_code}")
-        return f"Status Code: {response.status_code}"
+        response.raise_for_status()
+        logger.info(
+            "[5040 Refresh] User %s refreshed successfully, status: %s",
+            username, response.status_code
+        )
+        return response.text
+
+    except requests.HTTPError as e:
+        logger.error(
+            "[5040 Refresh] HTTP error for user %s: %s", username, e
+        )
+        return f"HTTPError: {e}"
+
     except requests.RequestException as e:
-        logger.error(f"Error sending request: {e}")
-        return f"Error: {e}"
+        logger.error(
+            "[5040 Refresh] Request error for user %s: %s", username, e
+        )
+        return f"RequestException: {e}"
