@@ -24,7 +24,7 @@ class RequestLog(models.Model):
 
 class WebTokens(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, null=True)
-    name = models.CharField(max_length=50, unique=True)
+    name = models.CharField(max_length=50)
     value = models.CharField(max_length=200, null=True)
 
     class Meta:

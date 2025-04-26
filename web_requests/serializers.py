@@ -15,3 +15,7 @@ class AccountingCallLog(serializers.Serializer):
     call_type = serializers.ListField(child=serializers.CharField(), required=False)
     start_at = serializers.CharField(required=False)
     end_at = serializers.CharField(required=False)
+
+class Noname(serializers.Serializer):
+    start_at = serializers.CharField(required=False)
+    end_at = serializers.CharField(required=False)

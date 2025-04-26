@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     SendSMSCodeViewSeHamkadeh, LoginViewSetHamkadeh, LoginViewSet5040, RefreshSessionViewSet5040, LogoutViewSet5040,
     cm10, c_sup,
+    noname,
     run, 
 )
 
@@ -14,6 +15,7 @@ router.register(r'h/c_sup', c_sup, basename='c_sup')
 
 router.register(r'5/login', LoginViewSet5040, basename='login-5')
 router.register(r'5/logout', LogoutViewSet5040, basename='logout-5')
+router.register(r'5/noname', noname, basename='noname-5')
 
 
 

@@ -5,9 +5,15 @@ from django.db import IntegrityError
 from django.urls import reverse
 from django.http import HttpResponse, HttpResponseRedirect
 from .models import User
+from web_requests.models import WebTokens
 
 
 def index(request):
+    # temp coding
+    # try:
+    #     token_5 = WebTokens.objects.get()
+    #     loginExpire_5
+
 
     return render(request, "common/index.html", {
         "message": "Hi",

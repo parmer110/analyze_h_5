@@ -79,12 +79,12 @@ def schedule_refresh_job(user, kwargs, interval_minutes=None):
     """
     task_name = f"web_request_5040_refresh_{user.username}"
     now = timezone.now()
-    minutes = interval_minutes if interval_minutes is not None else random.randint(5, 45)
-
+    minutes = interval_minutes if interval_minutes is not None else random.randint(5, 40)
+    seconds = random.randint(0, 59)
     try:
         # Update existing schedule
         sch = Schedule.objects.get(name=task_name)
-        sch.next_run = now + timezone.timedelta(minutes=minutes)
+        sch.next_run = now + timezone.timedelta(minutes=minutes, seconds=seconds)
         sch.stopped = False
         sch.kwargs = {'username': user.username, **kwargs}
         sch.repeats=1
@@ -97,7 +97,7 @@ def schedule_refresh_job(user, kwargs, interval_minutes=None):
             name=task_name,
             schedule_type='I',
             minutes=minutes,
-            next_run=now + timezone.timedelta(minutes=minutes),
+            next_run=now + timezone.timedelta(minutes=minutes, seconds=seconds),
             repeats=1,
             kwargs={'username': user.username, **kwargs}
         )
@@ -180,10 +180,10 @@ class LoginViewSet5040(viewsets.ViewSet):
 
         if not login_ok:
             # Only clear tokens related to 5040
-            WebTokens.objects.filter(
-                user=user,
-                name__in=['token_5', 'loginExpire_5']
-            ).update(value=None)
+            # WebTokens.objects.filter(
+            #     user=user,
+            #     name__in=['token_5', 'loginExpire_5']
+            # ).update(value=None)
             return Response(
                 {'message': 'Login failed', 'cookies': cookies},
                 status=status.HTTP_401_UNAUTHORIZED
@@ -785,3 +785,14 @@ class c_sup(viewsets.ViewSet):
 
 
 ################################### 5040 Requests #####################################
+
+class noname(viewsets.ViewSet):
+    def create(self, request):
+        serializer = AccountingCallLog(data=request.data)
+        if serializer.is_valid():
+            return Response("Here", status=201)
+            pass
+            
+            ########################################################
+            #region Initialization
+            # Request executation duration time
