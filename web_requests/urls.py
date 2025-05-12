@@ -3,8 +3,8 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     SendSMSCodeViewSeHamkadeh, LoginViewSetHamkadeh, LoginViewSet5040, RefreshSessionViewSet5040, LogoutViewSet5040,
     cm10, c_sup,
-    noname,
-    run, 
+    noname, archive,
+    run, openning_home_browser,
 )
 
 router = DefaultRouter()
@@ -15,7 +15,8 @@ router.register(r'h/c_sup', c_sup, basename='c_sup')
 
 router.register(r'5/login', LoginViewSet5040, basename='login-5')
 router.register(r'5/logout', LogoutViewSet5040, basename='logout-5')
-router.register(r'5/noname', noname, basename='noname-5')
+router.register(r'noname', noname, basename='noname')
+router.register(r'archive', archive, basename='archive')
 
 
 
@@ -23,4 +24,5 @@ urlpatterns = [
     path('', include(router.urls)),
     path('run/', run, name="run_request"),
     path('5/refresh/', RefreshSessionViewSet5040.as_view({'get': 'refresh_5'})),
+    path('5/open_home/', openning_home_browser, name="5040Home")
 ]

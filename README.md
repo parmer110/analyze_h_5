@@ -14,7 +14,13 @@ This project is designed to handle web page request simulations and generate res
 
 1. **Start the Django development server:**
    ```sh
-   python manage.py runserver
+   env\scripts\activate
+   psql -U parmer_110 -h 192.168.134.44 -d analyzeunit
+   python manage.py runserver 0.0.0.0:8001
+   python manage.py qcluster
+   uvicorn m10.asgi:application --reload --host 0.0.0.0 --port 8002
+   celery -A m10  worker --loglevel=info # celery -A m10 worker --loglevel=info --pool=solo
+   celery -A m10 flower
 
 #### Dependencies
 List the main dependencies required for the project.

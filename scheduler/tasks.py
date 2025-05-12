@@ -1,5 +1,11 @@
 import requests
 import logging
+from rest_framework.response import Response
+from celery import shared_task
+from rest_framework import status
+from selenium import webdriver
+from web_requests.models import WebTokens
+from common.models import User
 
 
 logger = logging.getLogger(__name__)
@@ -60,3 +66,15 @@ def web_request_5040_refresh(username=None, token_5=None, loginExpire_5=None, **
             "[5040 Refresh] Request error for user %s: %s", username, e
         )
         return f"RequestException: {e}"
+
+
+@shared_task
+def open_browser(user, token, loginExpire):
+
+    driver = webdriver.Chrome()
+
+    driver.get('https://panel.5040.me')
+    driver.add_cookie({'name': 'token', 'value': token})
+    driver.add_cookie({'name': 'loginExpire', 'value': loginExpire})
+
+    driver.get('https://panel.5040.me')

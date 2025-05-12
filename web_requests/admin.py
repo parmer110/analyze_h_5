@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import RequestLog, Requests, WebTokens
+from .models import RequestLog, Requests, WebTokens, RequestsForeign
 
 class RequestLogAdmin(admin.ModelAdmin):
     list_display=(
@@ -13,6 +13,12 @@ class RequestsAdmin(admin.ModelAdmin):
 class WebTokensAdmin(admin.ModelAdmin):
     list_display=('id', 'user', 'name', 'value')
 
+class RequestForeingAdmin(admin.ModelAdmin):
+    list_display=('id', 'timestamp', 'company', 'name', 'method', 'headers', 'query_parameters', 'body_parameters', 'endpoint', 'description')
+    list_editable=('company', 'name', 'method', 'headers', 'query_parameters', 'body_parameters', 'endpoint', 'description')
+
+
 admin.site.register(RequestLog, RequestLogAdmin)
 admin.site.register(Requests, RequestsAdmin)
 admin.site.register(WebTokens,WebTokensAdmin)
+admin.site.register(RequestsForeign, RequestForeingAdmin)

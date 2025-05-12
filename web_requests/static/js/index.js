@@ -15,7 +15,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const method = item.getAttribute('data-method');
             const headers = JSON.parse(item.getAttribute('data-header'));
             headers['X-CSRFToken'] = getCSRFToken();
-            const body = item.getAttribute('data-body');
+            let body = null
+            if(method != "GET") {
+                body = item.getAttribute('data-body');
+            }
 
             console.log(url)
             fetch(url, {

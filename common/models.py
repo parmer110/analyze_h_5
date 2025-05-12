@@ -7,3 +7,9 @@ class User(AbstractUser):
     groups = models.ManyToManyField(Group, related_name="custom_user", blank=True)
     user_permissions = models.ManyToManyField(Permission, related_name="custom_user", blank=True)
     
+class Companies(models.Model):
+    name = models.CharField(max_length=50)
+    description = models.TextField()
+    def __str__(self):
+        return self.name    
+    

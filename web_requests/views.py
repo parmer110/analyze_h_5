@@ -11,7 +11,10 @@ import random
 import asyncio
 import logging
 import ast
+import copy
+from django.http import HttpResponse
 from django.utils import timezone
+from datetime import timedelta
 from rest_framework import viewsets
 from rest_framework.response import Response
 from rest_framework.decorators import action
@@ -20,20 +23,37 @@ import xlwings as xw
 import pandas as pd
 from io import BytesIO
 from django.shortcuts import render
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from playwright.sync_api import sync_playwright
+from selenium import webdriver
+import webbrowser
 from asgiref.sync import sync_to_async
 from asgiref.sync import async_to_sync
 from channels.db import database_sync_to_async
 from django_q.tasks import schedule
 from django_q.models import Schedule
 from django.core.exceptions import ObjectDoesNotExist
-from .serializers import SendCodeSerializer, LoginSerializer, AccountingCallLog
-from .models import RequestLog, Requests, WebTokens
-from common.models import User
+import concurrent.futures
+from .serializers_h import (LoginSerializer, AccountingCallLog, 
+                          EntriesExtraction_f)
+from .serializers_5 import (FactorsList, EntriesExtraction_5)
+from .serializers import DynamicRequestSerializer, SendCodeSerializer
+from .models import RequestLog, Requests, WebTokens, RequestsForeign
+from common.models import User, Companies
+from scheduler.tasks import open_browser
+from .utils import handle_request, generate_daily_intervals
+from .request_params import (
+    _5_sale_entries_extraction_request_params,
+    _h_extract_numbers_request_params,
+    _5_call_logs_list_request_params,
+    _h_call_log_index_request_params,
+    _5_factors_list_request_params,
+    _h_factor_index_request_params
+)
 
 
 logger = logging.getLogger(__name__)
+
 
 class SendSMSCodeViewSeHamkadeh(viewsets.ViewSet):
     def create(self, request):
@@ -54,6 +74,17 @@ class LoginViewSetHamkadeh(viewsets.ViewSet):
     def create(self, request):
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():
+            username = serializer.validated_data['username']
+
+            try:
+                user = User.objects.get(username=username)
+            except User.DoesNotExist:
+                # Return error if user is not found
+                return Response(
+                    {'message': f"User {username} does not exist!"},
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+
             response = requests.post('https://api.hamkadeh.com/api/auth/login', json=serializer.validated_data)
             log = RequestLog.objects.create(
                 request_name = 'login Hamkadeh',
@@ -62,11 +93,21 @@ class LoginViewSetHamkadeh(viewsets.ViewSet):
                 request_data=serializer.validated_data,
                 response_data=response.json()
             )
+
+            ### Temporary marking: Authentication implement.
+            # if request.user.username == username:
+            #     pass
+            # else:
+            #     return Response("Username Error", status=411)
+
             token_h = response.json().get('token')
             if token_h:
+                WebTokens.objects.update_or_create(user=user, name="token_h", defaults={'value': token_h})
                 request.session['token_h'] = token_h
-                request.session['username_h'] = serializer.validated_data['username']
+
+            # Valid
             return Response(response.json())
+        
         return Response(serializer.errors, status=400)
 
 
@@ -79,7 +120,7 @@ def schedule_refresh_job(user, kwargs, interval_minutes=None):
     """
     task_name = f"web_request_5040_refresh_{user.username}"
     now = timezone.now()
-    minutes = interval_minutes if interval_minutes is not None else random.randint(5, 40)
+    minutes = interval_minutes if interval_minutes is not None else random.randint(5, 45)
     seconds = random.randint(0, 59)
     try:
         # Update existing schedule
@@ -235,7 +276,28 @@ async def run_playwright_for_refresh(token, loginExpire):
                 {'name': 'loginExpire', 'value': loginExpire, 'domain': 'panel.5040.me', 'path': '/'},
             ])
             page = context.new_page()
-            page.goto('https://panel.5040.me/', timeout=60000)
+
+            max_retries = 3
+            delay = 5  # seconds            
+
+            for attempt in range(max_retries):
+                try:
+                    page.goto('https://panel.5040.me/', timeout=60000)
+                    break  # Exit the loop if successful
+                except Exception as e:
+                    logging.error(f'Error navigating to URL: {e}')
+                    if attempt < max_retries:
+                        logging.info(f'Retrying in {delay} seconds...')
+                        time.sleep(delay)
+                    else:
+                        logging.error('Max retries reached, giving up.')
+
+
+            try:
+                page.goto('https://panel.5040.me/', timeout=60000)
+            except Exception as e:
+                logging.error(f'Error navigating to URL: {e}')
+            
             page.wait_for_load_state('networkidle')
             login_form = page.query_selector('form.auth-login-form.mt-2')
             cookies = context.cookies('https://panel.5040.me')
@@ -290,13 +352,24 @@ class RefreshSessionViewSet5040(viewsets.ViewSet):
             token, loginExpire
         )
         if login_form:
-            # Session expired; cancel scheduled job
-            task_name = f"web_request_5040_refresh_{user.username}"
-            await sync_to_async(schedule_cancelation, thread_sensitive=True)(task_name)
+            count_refresh_5 = request.session.get('count_refresh_5', 0)
+            if count_refresh_5 > 3:
+                # Session expired; cancel scheduled job
+                task_name = f"web_request_5040_refresh_{user.username}"
+                await sync_to_async(schedule_cancelation, thread_sensitive=True)(task_name)
+            else:
+                count_refresh_5 += 1
+                request.session['count_refresh_5'] = count_refresh_5
+            if is_internal:
+                await sync_to_async(schedule_refresh_job, thread_sensitive=True)(
+                    user, refresh_kwargs, interval_minutes=2
+                )
             return Response(
                 {'status': 'Session expired; please login again.'},
                 status=402
             )
+        
+        request.session['count_refresh_5'] = 0
 
         # Update WebTokens with fresh cookies
         cookie_map = {'token': 'token_5', 'loginExpire': 'loginExpire_5'}
@@ -365,7 +438,7 @@ class cm10(viewsets.ViewSet):
             starting_time = time.time()
             # Directories path
             shared_dir = r'C:\Users\eshraghi\Documents\esh\share\cm10\temp'
-            calc_file_path = r'C:\Users\eshraghi\Documents\esh\share\cm10\source\میسکال  مشاوران - Main.xlsm'
+            calc_file_path = r'C:\Users\eshraghi\Documents\esh\share\cm10\source\میسکال  مشاوران - Main.xlsb'
             
             # Jalali Date Time
             now_jalali = jdatetime.datetime.now()
@@ -514,25 +587,25 @@ class cm10(viewsets.ViewSet):
                 # Save workbooks
                 # Downloaded
                 # Getting file name
-                content_disposition = response.headers.get('Content-Disposition')
+                # content_disposition = response.headers.get('Content-Disposition')
 
-                if not os.path.exists(shared_dir):
-                    os.makedirs(shared_dir)
+                # if not os.path.exists(shared_dir):
+                #     os.makedirs(shared_dir)
 
-                if content_disposition:
-                    filename = re.findall('filename=(.+)', content_disposition)
-                    if filename:
-                        filename = filename[0]
-                        filename = f"{filename}_{formatted_jalali_date}.xlsx"
-                    else:
-                        filename = f"response_{formatted_jalali_date}.xlsx"
-                else:
-                    filename = f"response_{formatted_jalali_date}.xlsx"
+                # if content_disposition:
+                #     filename = re.findall('filename=(.+)', content_disposition)
+                #     if filename:
+                #         filename = filename[0]
+                #         filename = f"{filename}_{formatted_jalali_date}.xlsx"
+                #     else:
+                #         filename = f"response_{formatted_jalali_date}.xlsx"
+                # else:
+                #     filename = f"response_{formatted_jalali_date}.xlsx"
 
-                # Save exported file 
-                file_path = os.path.join(shared_dir, filename)
-                with open(file_path, 'wb') as f:
-                    f.write(response.content)
+                # # Save exported file 
+                # file_path = os.path.join(shared_dir, filename)
+                # with open(file_path, 'wb') as f:
+                #     f.write(response.content)
 
                 # Reference (formulas)
                 workbook.save(f'C:\\Users\\eshraghi\\Documents\\esh\\share\\cm10\\cm10_{formatted_jalali_date}.xlsm')
@@ -560,7 +633,7 @@ class cm10(viewsets.ViewSet):
                 request_type='POST',
                 request_data=serializer.validated_data,
                 response_data=response_data if response.headers.get('Content-Type') == 'application/json' else None,
-                file_path=file_path if response.headers.get('Content-Type') != 'application/json' else None,
+                file_path=calc_file_path if response.headers.get('Content-Type') != 'application/json' else None,
                 additional_info={'status_code': response.status_code},
                 execution_time=ext_duration
                 
@@ -723,25 +796,25 @@ class c_sup(viewsets.ViewSet):
                 # Save workbooks
                 # Downloaded
                 # Getting file name
-                content_disposition = response.headers.get('Content-Disposition')
+                # content_disposition = response.headers.get('Content-Disposition')
 
-                if not os.path.exists(shared_dir):
-                    os.makedirs(shared_dir)
+                # if not os.path.exists(shared_dir):
+                #     os.makedirs(shared_dir)
 
-                if content_disposition:
-                    filename = re.findall('filename=(.+)', content_disposition)
-                    if filename:
-                        filename = filename[0]
-                        filename = f"{filename}_{formatted_jalali_date}.xlsx"
-                    else:
-                        filename = f"response_{formatted_jalali_date}.xlsx"
-                else:
-                    filename = f"response_{formatted_jalali_date}.xlsx"
+                # if content_disposition:
+                #     filename = re.findall('filename=(.+)', content_disposition)
+                #     if filename:
+                #         filename = filename[0]
+                #         filename = f"{filename}_{formatted_jalali_date}.xlsx"
+                #     else:
+                #         filename = f"response_{formatted_jalali_date}.xlsx"
+                # else:
+                #     filename = f"response_{formatted_jalali_date}.xlsx"
 
-                # Save exported file 
-                file_path = os.path.join(shared_dir, filename)
-                with open(file_path, 'wb') as f:
-                    f.write(response.content)
+                # # Save exported file 
+                # file_path = os.path.join(shared_dir, filename)
+                # with open(file_path, 'wb') as f:
+                #     f.write(response.content)
 
                 # Reference (formulas)
                 workbook.save(f'C:\\Users\\eshraghi\\Documents\\esh\\share\\c_sup\\c_sup_{formatted_jalali_date}.xlsb')
@@ -786,13 +859,344 @@ class c_sup(viewsets.ViewSet):
 
 ################################### 5040 Requests #####################################
 
+def openning_home_browser(request):
+    username = request.GET.get('username')
+    token = request.GET.get('token_5')
+    loginExpire = request.GET.get('loginExpire_5')
+
+    try:
+        user = User.objects.get(username=username)
+    except User.DoesNotExist:
+        # Return error if user does not exist
+        return Response(
+            {'message': 'User not found'},
+            status=status.HTTP_401_UNAUTHORIZED
+        )
+
+    # Load tokens from DB if not provided
+    if not token or not loginExpire:
+        try:
+            token = WebTokens.objects.get(user=user, name='token_5').value
+            loginExpire = WebTokens.objects.get(user=user, name='loginExpire_5').value
+        except WebTokens.DoesNotExist:
+            return Response(
+                {'message': 'Tokens missing'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+ 
+    driver = webdriver.Chrome()
+
+    driver.get('https://panel.5040.me')
+    driver.add_cookie({'name': 'token', 'value': token})
+    driver.add_cookie({'name': 'loginExpire', 'value': loginExpire})
+
+    driver.get('https://panel.5040.me')
+
+
+    # open_browser.delay(user, token, loginExpire)
+
+    return HttpResponse("Browser opened")
+
+
 class noname(viewsets.ViewSet):
     def create(self, request):
-        serializer = AccountingCallLog(data=request.data)
-        if serializer.is_valid():
-            return Response("Here", status=201)
-            pass
+
+        username = request.query_params.get('username')
+        try:
+            user = User.objects.get(username=username)
+        except User.DoesNotExist:
+            # Return error if user does not exist
+            return Response(
+                {'message': 'User not found'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        entries_serializer = EntriesExtraction_5(data=request.data)
+        call_logs_serializer = CallLogsList(data=request.data)
+        factor_serializer = FactorsList(data=request.data)
+
+        if not entries_serializer.is_valid():
+            return Response({'Sale Entries Extraction serializer error':entries_serializer.errors, 'status':412})
+
+        if not call_logs_serializer.is_valid():
+            return Response({'Call Logs List serializer error':call_logs_serializer.errors, 'status':414})
+
+        if not factor_serializer.is_valid():
+            return Response({'Factors List serializer error':factor_serializer.errors, 'status':416})
             
-            ########################################################
-            #region Initialization
-            # Request executation duration time
+        # return Response(serializer.validated_data, status=201)
+        # return Response(username, status=201)
+        
+        ########################################################
+        #region Initialization
+        # Request executation duration time
+
+        starting_time = time.time()
+        # Directories path
+        shared_dir = r'C:\Users\eshraghi\Documents\esh\share\noname\temp'
+        calc_file_path = r'C:\Users\eshraghi\Documents\esh\share\noname\source\ads_vs_sale-main14040126.xlsx'
+
+        # Jalali Date Time
+        now_jalali = jdatetime.datetime.now()
+        formatted_jalali_date = now_jalali.strftime('%Y_%m_%d_%H_%M_%S')
+        year_jalali = now_jalali.year
+        month_jalali = now_jalali.month
+        day_jalali = now_jalali.day
+        
+        # Gregorian Date Time
+        gregorian_now = datetime.datetime.now()
+        date_gregorian = gregorian_now.date()
+        hour = gregorian_now.hour
+        nearest_before_hour = f"{hour:02}:00:00"
+
+        # COM Excel object preparation
+        app = xw.App(visible=False)
+        app.screen_updating = False
+        app.calculation = 'manual'
+        app.enable_events = False
+        app.display_alerts = False
+
+        # Initilization request prerequests
+        try:
+            token_5 = WebTokens.objects.get(user=user, name='token_5').value
+            loginExpire_5 = WebTokens.objects.get(user=user, name='loginExpire_5').value
+        except WebTokens.DoesNotExist:
+            return Response(
+                {'message': 'Tokens missing'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        extractions = ['5_Entries', '5_voip', '5_factors_reg', '5_factors_paid' ]
+
+        headers_5 = {
+            'Authorization': f'Bearer {token_5}',
+            'loginExpire': loginExpire_5
+        }
+
+        startEntryDate = (date_gregorian - timedelta(days=5)).strftime('%Y-%m-%d') # Default is 5 days before now
+        endEntryDate = f"{date_gregorian} {nearest_before_hour}".strftime('%Y-%m-%d %H:%M:%S')
+        payload_5_entries = {
+            "agencies": EntriesExtraction_5.validated_data.get("agencies", []),
+            "callStatuses": EntriesExtraction_5.validated_data.get("callStatuses", []),
+            "containDeletedEntries": EntriesExtraction_5.validated_data.get("containDeletedEntries", True),
+            "endEntryDate": EntriesExtraction_5.validated_data.get("endEntryDate", f"{endEntryDate}"),
+            "factorSerial": EntriesExtraction_5.validated_data.get("factorSerial", ""),
+            "factorStatuses": EntriesExtraction_5.validated_data.get("factorStatuses", []),
+            "isTrusted": EntriesExtraction_5.validated_data.get("isTrusted", True),
+            "justDeletedEntries": EntriesExtraction_5.validated_data.get("justDeletedEntries", False),
+            "maxCallNumber": EntriesExtraction_5.validated_data.get("maxCallNumber", ""),
+            "maxSuccessCallNumber": EntriesExtraction_5.validated_data.get("maxSuccessCallNumber", ""),
+            "minCallNumber": EntriesExtraction_5.validated_data.get("minCallNumber", ""),
+            "minSuccessCallNumber": EntriesExtraction_5.validated_data.get("minSuccessCallNumber", ""),
+            "mobile": EntriesExtraction_5.validated_data.get("mobile", ""),
+            "numberStatuses": EntriesExtraction_5.validated_data.get("numberStatuses", []),
+            "products": EntriesExtraction_5.validated_data.get("products", []),
+            "references": EntriesExtraction_5.validated_data.get("references", ["Landing", "Sms"]),
+            "startEntryDate": EntriesExtraction_5.validated_data.get("startEntryDate", f"{startEntryDate} 00:00:00"),
+            "withoutFactorEntries": EntriesExtraction_5.validated_data.get("withoutFactorEntries", False)
+        }
+
+        startCallDate = (date_gregorian).strftime('%Y-%m-%d')
+        endCallDate = f"{date_gregorian} {nearest_before_hour}".strftime('%Y-%m-%d %H:%M:%S')
+        params_5_call_logs = {
+            'report': call_logs_serializer.validated_data.get('export_data', "1"),
+            'filter': call_logs_serializer.validated_data.get(),
+            'startCallDate': call_logs_serializer.validated_data.get('startCallDate', f"{startCallDate} 00:00:00" ),
+            'endCallDate': call_logs_serializer.validated_data.get('endCallDate', f"{endCallDate}")
+        }
+
+        startFactorDate = (date_gregorian).strftime('%Y-%m-%d')
+        endFactorDate = f"{date_gregorian} {nearest_before_hour}".strftime('%Y-%m-%d %H:%M:%S')
+        params_5_factor = {
+            'report': factor_serializer.validated_data.get('export_data', "1"),
+            'filter': factor_serializer.validated_data.get(),
+            'startCallDate': factor_serializer.validated_data.get('startCallDate', f"{startFactorDate} 00:00:00" ),
+            'endCallDate': factor_serializer.validated_data.get('endCallDate', f"{endFactorDate}")
+        }
+
+        startFactorPaidDate = (date_gregorian).strftime('%Y-%m-%d')
+        endFactorPaidDate = f"{date_gregorian} {nearest_before_hour}".strftime('%Y-%m-%d %H:%M:%S')
+        params_5_factor_paid = {
+            'report': factor_serializer.validated_data.get('export_data', "1"),
+            'filter': factor_serializer.validated_data.get(),
+            'startCallDate': factor_serializer.validated_data.get('startCallDate', f"{startFactorPaidDate} 00:00:00" ),
+            'endCallDate': factor_serializer.validated_data.get('endCallDate', f"{endFactorPaidDate}")
+        }
+
+
+
+        request_data = [
+            ('POST', 'https://api.5040.me/api/sale/entries/extraction', headers_5, payload_5_entries),
+            ('GET', 'https://api.5040.me/api/call/logs/list', headers_5, params_5_call_logs),
+            ('GET', 'https://api.5040.me/api/factors/list', headers_5, params_5_factor),
+            ('GET', 'https://api.5040.me/api/factors/list', headers_5, params_5_factor_paid),
+            ('POST', 'https://api.hamkadeh.com/api/entry/extract-numbers', headers, payload_h_entries),
+            ('GET', 'https://api.hamkadeh.com/api/call-log/index', headers, params_h_voip),
+            ('GET', 'https://api.hamkadeh.com/api/factor/index', headers, params_h_factor_reg),
+            ('GET', 'https://api.hamkadeh.com/api/factor/index', headers, params_h_factor_paid),
+        ]            
+        
+
+        # response = requests.post('https://api.5040.me/api/sale/entries/extraction', headers=headers, json=payload)
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = [executor.submit(handle_request, method, url, headers, params) for method, url, headers, params in request_data]
+            results = [future.result() for future in concurrent.futures.as_completed(futures)]
+
+        try:
+            downloaded_df = pd.read_excel(BytesIO(response.content))
+        except ValueError as e:
+            logging.error("Error reading Excel file: %s", e)
+            return Response({'issue':'Please log in before making a request.', 'status':400})
+
+        content_disposition = response.headers.get('Content-Disposition')
+
+        if not os.path.exists(shared_dir):
+            os.makedirs(shared_dir)
+
+        if content_disposition:
+            filename = re.findall('filename=(.+)', content_disposition)
+            if filename:
+                filename = filename[0]
+                filename = f"{filename}_{formatted_jalali_date}.xlsx"
+            else:
+                filename = f"response_{formatted_jalali_date}.xlsx"
+        else:
+            filename = f"response_{formatted_jalali_date}.xlsx"
+
+        # Save exported file 
+        file_path = os.path.join(shared_dir, filename)
+        with open(file_path, 'wb') as f:
+            f.write(response.content)
+
+
+class archive(viewsets.ViewSet):
+    def create(self, request):
+
+        # Initialization
+        starting_time = time.time()
+
+        username = request.query_params.get('username')
+        try:
+            user = User.objects.get(username=username)
+        except User.DoesNotExist:
+            # Return error if user does not exist
+            return Response(
+                {'message': 'User not found'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        # Tokens
+        try:
+            # 5040
+            token_5 = WebTokens.objects.get(user=user, name='token_5').value
+            loginExpire_5 = WebTokens.objects.get(user=user, name='loginExpire_5').value
+
+            # Hamkadeh
+            token_h = WebTokens.objects.get(user=user, name='token_h').value
+
+        except WebTokens.DoesNotExist:
+            return Response(
+                {'message': 'Tokens missing'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        headers_5 = {
+            'Authorization': f'Bearer {token_5}',
+            'loginExpire': loginExpire_5
+        }
+        headers_h = {
+            'Authorization': f'Bearer {token_h}'
+        }
+
+        # Directories path
+        shared_dir = r'C:\Users\eshraghi\Documents\esh\share\noname\temp'
+        calc_file_path = r'C:\Users\eshraghi\Documents\esh\share\noname\source\ads_vs_sale-main14040126.xlsx'
+
+        # Gregorian Date Time
+        gregorian_now = datetime.datetime.now()
+
+        # Functions requesting web_app
+        request_handler_map = {
+            ('5040', 'sale/entries/extraction'): _5_sale_entries_extraction_request_params,
+            ('5040', 'call/logs/list'): _5_call_logs_list_request_params,
+            ('5040', 'factor/index'): _5_factors_list_request_params,
+            ('hamkadeh', 'entry/extract-numbers'): _h_extract_numbers_request_params,
+            ('hamkadeh', 'call-log/index'): _h_call_log_index_request_params,
+            ('hamkadeh', 'factors/list'): _h_factor_index_request_params,
+        }
+
+        # Dynamic Serializer: Iteration loop over each company-name request perform data valication and initalize.
+        expanded_tasks = []
+        
+        for req in request.data:
+
+            company = req.get("company").lower()
+            name = req.get("name").lower()
+            body_parameters = req.get("body", None)
+            query_parameters = req.get("query", None)
+
+            try:
+                company_inst = Companies.objects.get(name=company)
+            except RequestsForeign.DoesNotExist:
+                return Response(f'The Company: {company} does not exist!' , status=405)
+
+            try:
+                request_instance = RequestsForeign.objects.get(company=company_inst, name=name)
+            except RequestsForeign.DoesNotExist:
+                return Response(f'The {name} does not exist for {company} company defined requests!' , status=405)
+            
+            # Dynamic serializer
+            serializer = DynamicRequestSerializer(data={**body_parameters, **query_parameters}, request_foreign=request_instance)
+
+            if not serializer.is_valid():
+                return Response({f'Company "{company}", Request "{name}" serializer error!':serializer.errors, 'status':412})
+
+            company_name_pair = (company, name)
+            if company_name_pair in request_handler_map:
+                parameters, start_date_name, end_date_name  = request_handler_map[company_name_pair](serializer, gregorian_now)
+            else:
+                return Response(f"No requesting function defined for company: {company}, name: {name}", status=400)
+
+            if company == "hamkadeh":
+                headers = headers_h
+            elif company == "5040":
+                headers = headers_5
+
+            task = (request_instance.method, request_instance.endpoint, headers, parameters)
+
+            start_date = parameters[start_date_name].strftime('%Y/%m/%d %H:%M:%S')
+            end_date = parameters[end_date_name].strftime('%Y/%m/%d %H:%M:%S')
+            
+            # separate date rage each day individual considering first starting and lans ending hours
+            dates = generate_daily_intervals(start_date, end_date)
+
+            method, url, headers, params = task
+            for interval in dates:
+                new_params = copy.deepcopy(params)
+
+                new_params[start_date_name] = interval['start_date']
+                new_params[end_date_name] = interval['end_date']
+
+                expanded_tasks.append((method, url, headers, new_params))
+
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10000) as executor:
+            futures = [
+                executor.submit(handle_request, method, url, headers, params)
+                for method, url, headers, params in expanded_tasks
+            ]
+
+            completed_tasks_counter = 0
+            for future in as_completed(futures):
+                completed_tasks_counter += 1
+                result = future.result()
+
+        return Response(expanded_tasks, status=201)
+
+
+        try:
+            downloaded_df = pd.read_excel(BytesIO(response.content))
+        except ValueError as e:
+            logging.error("Error reading Excel file: %s", e)
+            return Response({'issue': f'Error reading Excel file: {e}', 'status': 400})
