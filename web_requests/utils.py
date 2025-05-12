@@ -1,7 +1,13 @@
 import requests
 import jdatetime
+import logging
+import re
+import os
 from datetime import timedelta
 from typing import List, Dict
+from email.parser import HeaderParser
+from urllib.parse import unquote
+
 
 def fetch_data():
     url = 'https://api.hamkadeh.com/api/accounting/call-log/index'
@@ -20,18 +26,36 @@ def fetch_data():
     response = requests.post(url, params=params, headers=headers)
     return response.content
 
-def handle_request(method, url, headers, data):
+def handle_request(method, url, headers, data, start_date, end_date):
     response = None
     counter = 0
     if method == 'GET':
-        while not response or counter > 3:
+        while not response or not response.ok and counter <= 3:
+
+            # logging.info(f"Attempting GET request to {url} with headers {headers} and params {data}.")
+
             response = requests.get(url, headers=headers, params=data)
             counter += 1
+
+            # if response.ok:
+            #     logging.info(f"GET request to {url} succeeded with status code {response.status_code}.")
+            # else:
+            #     logging.error(f"GET request to {url} failed with status code {response.status_code}.")
+
     elif method == 'POST':
-        while not response or counter > 3:
+        while not response or not response.ok and counter <= 3:
+
+            # logging.info(f"Attempting GET request to {url} with headers {headers} and params {data}.")
+            
             response = requests.post(url, headers=headers, json=data)
             counter += 1
-    return response
+
+            # if response.ok:
+            #     logging.info(f"GET request to {url} succeeded with status code {response.status_code}.")
+            # else:
+            #     logging.error(f"GET request to {url} failed with status code {response.status_code}.")
+
+    return response, start_date, end_date
 
 def parse_jalali_datetime(date_str: str, format_with_sec: str, format_without_sec: str) -> jdatetime.datetime:
     """Parse Jalali date string with flexible seconds handling"""
@@ -88,3 +112,69 @@ def generate_daily_intervals(start_str: str, end_str: str) -> List[Dict[str, str
         current = day_end + timedelta(seconds=1)
 
     return intervals
+
+
+from email.parser import HeaderParser
+from urllib.parse import unquote
+
+def extract_filename(content_disposition: str) -> str | None:
+    if not content_disposition:
+        return None
+
+    parser = HeaderParser()
+    msg = parser.parsestr(f'Content-Disposition: {content_disposition}')
+    # پارامترها را به‌صورت لیست (یا tuple برای RFC2231) می‌گیریم
+    params = msg.get_params(header='content-disposition', unquote=False)
+
+    # اولویت به filename*
+    for key, val in params:
+        if key.lower() == 'filename*' and val:
+            # اگر tuple باشد (RFC2231)، آن را جداسازی کن
+            if isinstance(val, tuple) and len(val) == 3:
+                encoding, lang, filename_enc = val
+                try:
+                    return unquote(filename_enc, encoding=encoding)
+                except LookupError:
+                    return unquote(filename_enc, encoding='utf-8')
+            # اگر رشته بود، مستقیم unquote کن
+            return unquote(val)
+
+    # سپس filename ساده
+    for key, val in params:
+        if key.lower() == 'filename' and val:
+            # اگر tuple باشد، عنصر اول را بگیر
+            if isinstance(val, tuple):
+                val = val[0]
+            return str(val)
+
+    return None
+
+
+def sanitize_filename(name) -> str:
+    # اگر ورودی tuple بود، آن را به رشته‌ی قابل‌خواندن تبدیل کن
+    if isinstance(name, tuple):
+        # معمولاً نام فایل در عنصر آخر tuple است
+        name = name[-1]
+    # تضمین تبدیل به str
+    name = str(name)
+    # جایگزینی کاراکترهای غیرمجاز ویندوز با زیرخط
+    return re.sub(r'[\\\/:*?"<>|]', '_', name)
+
+def fallback_extract(content_disp: str) -> str | None:
+    # بررسی filename*=UTF-8''Name.ext
+    m = re.search(r"filename\*\s*=\s*UTF-8''(?P<name>[^;]+)", content_disp)
+    if m:
+        # decode درصدگذاری شده
+        return unquote(m.group('name'))
+    # بررسی filename="Name.ext" یا filename=Name.ext
+    m2 = re.search(r'filename\s*=\s*"?(?P<name>[^";]+)"?', content_disp)
+    if m2:
+        return m2.group('name')
+    return None
+
+def remove_all_extensions(filename):
+    while True:
+        base, ext = os.path.splitext(filename)
+        if not ext:
+            return base
+        filename = base

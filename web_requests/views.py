@@ -41,7 +41,9 @@ from .serializers import DynamicRequestSerializer, SendCodeSerializer
 from .models import RequestLog, Requests, WebTokens, RequestsForeign
 from common.models import User, Companies
 from scheduler.tasks import open_browser
-from .utils import handle_request, generate_daily_intervals
+from .utils import (
+    handle_request, generate_daily_intervals, extract_filename, sanitize_filename, fallback_extract, remove_all_extensions
+)
 from .request_params import (
     _5_sale_entries_extraction_request_params,
     _h_extract_numbers_request_params,
@@ -1074,7 +1076,15 @@ class archive(viewsets.ViewSet):
     def create(self, request):
 
         # Initialization
+
+        # Gregorian Date Time
+        gregorian_now = datetime.datetime.now()
+        
         starting_time = time.time()
+        now_jalali = jdatetime.datetime.now()
+        formatted_jalali_date = now_jalali.strftime('%Y_%m_%d_%H_%M_%S')
+        shared_dir = r'C:\Users\eshraghi\Documents\esh\share\archive'
+        shared_dir = os.path.join(shared_dir, formatted_jalali_date)
 
         username = request.query_params.get('username')
         try:
@@ -1108,13 +1118,6 @@ class archive(viewsets.ViewSet):
         headers_h = {
             'Authorization': f'Bearer {token_h}'
         }
-
-        # Directories path
-        shared_dir = r'C:\Users\eshraghi\Documents\esh\share\noname\temp'
-        calc_file_path = r'C:\Users\eshraghi\Documents\esh\share\noname\source\ads_vs_sale-main14040126.xlsx'
-
-        # Gregorian Date Time
-        gregorian_now = datetime.datetime.now()
 
         # Functions requesting web_app
         request_handler_map = {
@@ -1178,25 +1181,60 @@ class archive(viewsets.ViewSet):
                 new_params[start_date_name] = interval['start_date']
                 new_params[end_date_name] = interval['end_date']
 
-                expanded_tasks.append((method, url, headers, new_params))
+                expanded_tasks.append((method, url, headers, new_params,interval['start_date'], interval['end_date']))
 
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=10000) as executor:
             futures = [
-                executor.submit(handle_request, method, url, headers, params)
-                for method, url, headers, params in expanded_tasks
+                executor.submit(handle_request, method, url, headers, params, start_date, end_date)
+                for method, url, headers, params, start_date, end_date in expanded_tasks
             ]
 
             completed_tasks_counter = 0
+            completed_tasks = []
+
             for future in as_completed(futures):
                 completed_tasks_counter += 1
-                result = future.result()
+                completed_tasks.append(future.result())
+                result, start_date, end_date = future.result()
 
-        return Response(expanded_tasks, status=201)
+                try:
+                    downloaded_df = pd.read_excel(BytesIO(result.content))
+                except ValueError as e:
+                    logging.error("Error reading Excel file: %s", e)
+                    return Response({'issue': f'Error reading Excel file: {e}', 'status': 400})
+
+                content_disp = result.headers.get('Content-Disposition')
+                # print(">> Content-Disposition header:", repr(content_disp))
+
+                # بافل regex
+                raw_name  = extract_filename(content_disp)
+                if raw_name is None and content_disp:
+                    raw_name = fallback_extract(content_disp)
+
+                os.makedirs(shared_dir, exist_ok=True)
+                
+                # Convert Date times from gregorian to Jalali which first converting object from string
+                start_date = datetime.datetime.strptime(start_date, '%Y/%m/%d %H:%M:%S')
+                start_date = jdatetime.datetime.fromgregorian(date=start_date).strftime('%Y_%m_%d_%H_%M_%S')
+
+                end_date = datetime.datetime.strptime(end_date, '%Y/%m/%d %H:%M:%S')                
+                end_date = jdatetime.datetime.fromgregorian(date=end_date).strftime('%Y_%m_%d_%H_%M_%S')
+
+                file_suffix = f"{start_date}__{end_date}"
 
 
-        try:
-            downloaded_df = pd.read_excel(BytesIO(response.content))
-        except ValueError as e:
-            logging.error("Error reading Excel file: %s", e)
-            return Response({'issue': f'Error reading Excel file: {e}', 'status': 400})
+                if raw_name:
+                    raw_name = remove_all_extensions(raw_name)
+                    clean_name = sanitize_filename(raw_name)
+                    filename   = f"{clean_name}_{file_suffix}.xlsx"
+                else:
+                    filename   = f"response_{file_suffix}.xlsx"
+
+                # Save exported file 
+                file_path = os.path.join(shared_dir, filename)
+                with open(file_path, 'wb') as f:
+                    f.write(result.content)
+
+
+        return Response(completed_tasks_counter, status=201)
