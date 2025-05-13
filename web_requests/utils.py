@@ -114,35 +114,26 @@ def generate_daily_intervals(start_str: str, end_str: str) -> List[Dict[str, str
     return intervals
 
 
-from email.parser import HeaderParser
-from urllib.parse import unquote
-
 def extract_filename(content_disposition: str) -> str | None:
     if not content_disposition:
         return None
 
     parser = HeaderParser()
     msg = parser.parsestr(f'Content-Disposition: {content_disposition}')
-    # پارامترها را به‌صورت لیست (یا tuple برای RFC2231) می‌گیریم
     params = msg.get_params(header='content-disposition', unquote=False)
 
-    # اولویت به filename*
     for key, val in params:
         if key.lower() == 'filename*' and val:
-            # اگر tuple باشد (RFC2231)، آن را جداسازی کن
             if isinstance(val, tuple) and len(val) == 3:
                 encoding, lang, filename_enc = val
                 try:
                     return unquote(filename_enc, encoding=encoding)
                 except LookupError:
                     return unquote(filename_enc, encoding='utf-8')
-            # اگر رشته بود، مستقیم unquote کن
             return unquote(val)
 
-    # سپس filename ساده
     for key, val in params:
         if key.lower() == 'filename' and val:
-            # اگر tuple باشد، عنصر اول را بگیر
             if isinstance(val, tuple):
                 val = val[0]
             return str(val)

@@ -1077,6 +1077,8 @@ class archive(viewsets.ViewSet):
 
         # Initialization
 
+        starting_time = time.time()
+
         # Gregorian Date Time
         gregorian_now = datetime.datetime.now()
         
@@ -1194,18 +1196,23 @@ class archive(viewsets.ViewSet):
             completed_tasks = []
 
             for future in as_completed(futures):
+
                 completed_tasks_counter += 1
                 completed_tasks.append(future.result())
+
                 result, start_date, end_date = future.result()
 
-                try:
-                    downloaded_df = pd.read_excel(BytesIO(result.content))
-                except ValueError as e:
-                    logging.error("Error reading Excel file: %s", e)
-                    return Response({'issue': f'Error reading Excel file: {e}', 'status': 400})
+                # try:
+                #     downloaded_df = pd.read_excel(BytesIO(result.content))
+                # except ValueError as e:
+                #     logging.error("Error reading Excel file: %s", e)
+                #     return Response({'issue': f'Error reading Excel file: {e}', 'status': 400})
 
                 content_disp = result.headers.get('Content-Disposition')
                 # print(">> Content-Disposition header:", repr(content_disp))
+                # print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
+                # print(content_disp)
+
 
                 # بافل regex
                 raw_name  = extract_filename(content_disp)
@@ -1236,5 +1243,11 @@ class archive(viewsets.ViewSet):
                 with open(file_path, 'wb') as f:
                     f.write(result.content)
 
+        ext_duration = datetime.timedelta(seconds=time.time() - starting_time)
 
-        return Response(completed_tasks_counter, status=201)
+        response_data = {
+            "completed_tasks_counter": completed_tasks_counter,
+            "ext_duration": ext_duration
+        }                
+
+        return Response(response_data, status=201)

@@ -1,5 +1,6 @@
 from pathlib import Path
 from decouple import config
+from .logging_setup import LOGGING
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
