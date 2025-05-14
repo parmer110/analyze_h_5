@@ -4,7 +4,7 @@ from .views import (
     SendSMSCodeViewSeHamkadeh, LoginViewSetHamkadeh, LoginViewSet5040, RefreshSessionViewSet5040, LogoutViewSet5040,
     cm10, c_sup,
     noname, archive,
-    run, openning_home_browser,
+    run, openning_home_browser
 )
 
 router = DefaultRouter()
@@ -24,5 +24,5 @@ urlpatterns = [
     path('', include(router.urls)),
     path('run/', run, name="run_request"),
     path('5/refresh/', RefreshSessionViewSet5040.as_view({'get': 'refresh_5'})),
-    path('5/open_home/', openning_home_browser, name="5040Home")
+    path('5/open_home/', openning_home_browser, name="5040Home"),
 ]

@@ -11,6 +11,7 @@ import random
 import asyncio
 import logging
 import ast
+import threading
 import copy
 from django.http import HttpResponse
 from django.utils import timezone
@@ -688,9 +689,9 @@ class c_sup(viewsets.ViewSet):
             hour = gregorian_now.hour
             nearest_odd_hour = hour if hour % 2 == 1 else hour - 1
             # For "comand_center" sheet
-            nearest_odd_hour_formatted = f"{nearest_odd_hour:02}:00"
+            nearest_odd_hour_formatted = f"{nearest_odd_hour:02}:00:00"
             # Handling request dynamically
-            start_at_gregorian = serializer.validated_data.get('start_at', f"{date_gregorian} 00:00")
+            start_at_gregorian = serializer.validated_data.get('start_at', f"{date_gregorian} 00:00:00")
             end_at_gregorian = serializer.validated_data.get('end_at', f"{date_gregorian} {nearest_odd_hour_formatted}")
 
             app = xw.App(visible=False)
@@ -1141,6 +1142,11 @@ class archive(viewsets.ViewSet):
             body_parameters = req.get("body", None)
             query_parameters = req.get("query", None)
 
+            shared_dir = os.path.join(shared_dir, sanitize_filename(company))
+            shared_dir = os.path.join(shared_dir, sanitize_filename(name))
+            
+            os.makedirs(shared_dir, exist_ok=True)
+
             try:
                 company_inst = Companies.objects.get(name=company)
             except RequestsForeign.DoesNotExist:
@@ -1153,6 +1159,9 @@ class archive(viewsets.ViewSet):
             
             # Dynamic serializer
             serializer = DynamicRequestSerializer(data={**body_parameters, **query_parameters}, request_foreign=request_instance)
+
+            # print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
+            # print(f"serializer: {serializer}, query_parameters: {query_parameters}")
 
             if not serializer.is_valid():
                 return Response({f'Company "{company}", Request "{name}" serializer error!':serializer.errors, 'status':412})
@@ -1183,13 +1192,14 @@ class archive(viewsets.ViewSet):
                 new_params[start_date_name] = interval['start_date']
                 new_params[end_date_name] = interval['end_date']
 
-                expanded_tasks.append((method, url, headers, new_params,interval['start_date'], interval['end_date']))
+                expanded_tasks.append((method, url, headers, new_params,interval['start_date'], interval['end_date'], shared_dir))
 
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10000) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
+            event = threading.Event()
             futures = [
-                executor.submit(handle_request, method, url, headers, params, start_date, end_date)
-                for method, url, headers, params, start_date, end_date in expanded_tasks
+                executor.submit(handle_request, method, url, headers, params, start_date, end_date, shared_dir)
+                for method, url, headers, params, start_date, end_date, shared_dir in expanded_tasks
             ]
 
             completed_tasks_counter = 0
@@ -1200,7 +1210,7 @@ class archive(viewsets.ViewSet):
                 completed_tasks_counter += 1
                 completed_tasks.append(future.result())
 
-                result, start_date, end_date = future.result()
+                result, start_date, end_date, shared_dir = future.result()
 
                 # try:
                 #     downloaded_df = pd.read_excel(BytesIO(result.content))
@@ -1208,40 +1218,42 @@ class archive(viewsets.ViewSet):
                 #     logging.error("Error reading Excel file: %s", e)
                 #     return Response({'issue': f'Error reading Excel file: {e}', 'status': 400})
 
-                content_disp = result.headers.get('Content-Disposition')
-                # print(">> Content-Disposition header:", repr(content_disp))
-                # print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
-                # print(content_disp)
-
-
-                # بافل regex
-                raw_name  = extract_filename(content_disp)
-                if raw_name is None and content_disp:
-                    raw_name = fallback_extract(content_disp)
-
-                os.makedirs(shared_dir, exist_ok=True)
                 
-                # Convert Date times from gregorian to Jalali which first converting object from string
-                start_date = datetime.datetime.strptime(start_date, '%Y/%m/%d %H:%M:%S')
-                start_date = jdatetime.datetime.fromgregorian(date=start_date).strftime('%Y_%m_%d_%H_%M_%S')
+                if result.ok:
+                    logger.debug(f"Success fetching {company}'s {name} report in {start_date} to {end_date}.")
 
-                end_date = datetime.datetime.strptime(end_date, '%Y/%m/%d %H:%M:%S')                
-                end_date = jdatetime.datetime.fromgregorian(date=end_date).strftime('%Y_%m_%d_%H_%M_%S')
+                    content_disp = result.headers.get('Content-Disposition')
+                    # print(">> Content-Disposition header:", repr(content_disp))
+                    # print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
+                    # print(content_disp)
 
-                file_suffix = f"{start_date}__{end_date}"
+                    # بافل regex
+                    raw_name  = extract_filename(content_disp)
+                    if raw_name is None and content_disp:
+                        raw_name = fallback_extract(content_disp)                
+                    
+                    # Convert Date times from gregorian to Jalali which first converting object from string
+                    start_date = datetime.datetime.strptime(start_date, '%Y/%m/%d %H:%M:%S')
+                    start_date = jdatetime.datetime.fromgregorian(date=start_date).strftime('%Y_%m_%d_%H_%M_%S')
 
+                    end_date = datetime.datetime.strptime(end_date, '%Y/%m/%d %H:%M:%S')                
+                    end_date = jdatetime.datetime.fromgregorian(date=end_date).strftime('%Y_%m_%d_%H_%M_%S')
 
-                if raw_name:
-                    raw_name = remove_all_extensions(raw_name)
-                    clean_name = sanitize_filename(raw_name)
-                    filename   = f"{clean_name}_{file_suffix}.xlsx"
+                    file_suffix = f"{start_date}__{end_date}"
+
+                    if raw_name:
+                        raw_name = remove_all_extensions(raw_name)
+                        clean_name = sanitize_filename(raw_name)
+                        filename   = f"{clean_name}_{file_suffix}.xlsx"
+                    else:
+                        filename   = f"response_{file_suffix}.xlsx"
+
+                    # Save exported file 
+                    file_path = os.path.join(shared_dir, filename)
+                    with open(file_path, 'wb') as f:
+                        f.write(result.content)
                 else:
-                    filename   = f"response_{file_suffix}.xlsx"
-
-                # Save exported file 
-                file_path = os.path.join(shared_dir, filename)
-                with open(file_path, 'wb') as f:
-                    f.write(result.content)
+                    logger.error(f"Error in fetching {company}'s {name} report in {start_date} to {end_date}!")
 
         ext_duration = datetime.timedelta(seconds=time.time() - starting_time)
 

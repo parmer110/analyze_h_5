@@ -26,7 +26,7 @@ def fetch_data():
     response = requests.post(url, params=params, headers=headers)
     return response.content
 
-def handle_request(method, url, headers, data, start_date, end_date):
+def handle_request(method, url, headers, data, start_date, end_date, shared_dir):
     response = None
     counter = 0
     if method == 'GET':
@@ -36,6 +36,10 @@ def handle_request(method, url, headers, data, start_date, end_date):
 
             response = requests.get(url, headers=headers, params=data)
             counter += 1
+            
+            # print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
+            # print(response.url)
+
 
             # if response.ok:
             #     logging.info(f"GET request to {url} succeeded with status code {response.status_code}.")
@@ -55,7 +59,7 @@ def handle_request(method, url, headers, data, start_date, end_date):
             # else:
             #     logging.error(f"GET request to {url} failed with status code {response.status_code}.")
 
-    return response, start_date, end_date
+    return response, start_date, end_date, shared_dir
 
 def parse_jalali_datetime(date_str: str, format_with_sec: str, format_without_sec: str) -> jdatetime.datetime:
     """Parse Jalali date string with flexible seconds handling"""
@@ -142,13 +146,9 @@ def extract_filename(content_disposition: str) -> str | None:
 
 
 def sanitize_filename(name) -> str:
-    # اگر ورودی tuple بود، آن را به رشته‌ی قابل‌خواندن تبدیل کن
     if isinstance(name, tuple):
-        # معمولاً نام فایل در عنصر آخر tuple است
         name = name[-1]
-    # تضمین تبدیل به str
     name = str(name)
-    # جایگزینی کاراکترهای غیرمجاز ویندوز با زیرخط
     return re.sub(r'[\\\/:*?"<>|]', '_', name)
 
 def fallback_extract(content_disp: str) -> str | None:
