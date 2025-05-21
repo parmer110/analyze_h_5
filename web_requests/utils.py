@@ -8,6 +8,8 @@ from typing import List, Dict
 from email.parser import HeaderParser
 from urllib.parse import unquote
 
+logger = logging.getLogger(__name__)
+
 
 def fetch_data():
     url = 'https://api.hamkadeh.com/api/accounting/call-log/index'
@@ -26,39 +28,80 @@ def fetch_data():
     response = requests.post(url, params=params, headers=headers)
     return response.content
 
-def handle_request(method, url, headers, data, start_date, end_date, shared_dir):
+def handle_request(method, url, headers, data, start_date, end_date, shared_dir, lock, responseflag):
     response = None
     counter = 0
     if method == 'GET':
-        while not response or not response.ok and counter <= 3:
-
-            # logging.info(f"Attempting GET request to {url} with headers {headers} and params {data}.")
-
-            response = requests.get(url, headers=headers, params=data)
+        while (not response or not response.ok) and counter <= 3:
             counter += 1
+
+            logger.info(f"Attempting GET request to {url} with headers {headers} and params {data}.")
+
+            try:
+                print(f'→ count: {counter}, url: {url}, start date: {start_date}, end date: {end_date}←')
+                response = requests.get(url, headers=headers, params=data, timeout=1200)
+            except requests.exceptions.ConnectionError:
+                response = None
+            except requests.exceptions.Timeout:
+                response = None
             
-            # print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
-            # print(response.url)
-
-
-            # if response.ok:
-            #     logging.info(f"GET request to {url} succeeded with status code {response.status_code}.")
-            # else:
-            #     logging.error(f"GET request to {url} failed with status code {response.status_code}.")
+            if response is not None and response.ok:
+                # print(f"GET request to {response.url} Header is {headers} Succeeded with status code {response.status_code}.")
+                logger.info(f"GET request to {response.url} succeeded with status code {response.status_code}.")
+            else:
+                if response:
+                    logger.error(f"GET request to {response.url} failed with status code {response.status_code}.")
+                else:
+                    logger.error(f"GET request to {url}, start date: {start_date}, end date: {end_date} failed 666!!!")
+                # Perform tokens updatation while request issued.
+                if url.split('.')[1] == "5040":
+                    if responseflag:
+                        print(f'5040 issue→→→→Locked←←←←, url: {url}, start date: {start_date}, end date: {end_date} ')
+                        lock.acquire()
+                        lock.release()
+                        print(f'5040 issue→→→→Locke ♥♥Release♥♥←←←←, url: {url}, start date: {start_date}, end date: {end_date} ')
+                    else:
+                        lock.acquire()
+                        responseflag = True
+                        response_temp = requests.get('http://192.168.134.10:8002/web_requests/5/refresh/?username=aeshraghi', timeout=300)
+                        responseflag = False
+                        lock.release()
+                        print(f'5040 Refreshing→→→→{response_temp}←←←←')
+                    
+                # Perform tokens updatation while request issued.
 
     elif method == 'POST':
-        while not response or not response.ok and counter <= 3:
-
-            # logging.info(f"Attempting GET request to {url} with headers {headers} and params {data}.")
-            
-            response = requests.post(url, headers=headers, json=data)
+        while (not response or not response.ok) and counter <= 3:
             counter += 1
 
-            # if response.ok:
-            #     logging.info(f"GET request to {url} succeeded with status code {response.status_code}.")
-            # else:
-            #     logging.error(f"GET request to {url} failed with status code {response.status_code}.")
+            logger.info(f"Attempting POST request to {url} with headers {headers} and params {data}.")
+            
+            try:
+                # Debug
+                print(f'◄count: {counter}, url: {url}, start date: {start_date}, end date: {end_date}►')
+                response = requests.post(url, headers=headers, json=data, timeout=1200)
+            except requests.exceptions.ConnectionError:
+                response = None
+            except requests.exceptions.Timeout:
+                response = None
 
+            if response is not None and response.ok:
+                # print(f"POST request to {response.url} Succeeded with status code {response.status_code}.")
+                logger.info(f"POST request to {response.url} succeeded with status code {response.status_code}.")
+            else:
+                if response:
+                    logger.error(f"POST request to {response.url} failed with status code {response.status_code}.")
+                else:
+                    logger.error(f"POST request to {url}, start date: {start_date}, end date: {end_date} failed 666!!!")
+                # Perform tokens updatation while request issued.
+                if url.split('.')[1] == "5040":
+                    # response_temp = requests.get('http://192.168.134.10:8002/web_requests/5/refresh/?username=aeshraghi', timeout=300)
+                    # print(f'→→→→{response_temp}←←←←')
+                    pass
+        
+    counter = 0
+
+    print(f"request to {response.url} Header is {headers} with status code {response.status_code}.")
     return response, start_date, end_date, shared_dir
 
 def parse_jalali_datetime(date_str: str, format_with_sec: str, format_without_sec: str) -> jdatetime.datetime:
@@ -69,50 +112,63 @@ def parse_jalali_datetime(date_str: str, format_with_sec: str, format_without_se
         parsed = jdatetime.datetime.strptime(date_str, format_without_sec)
         return parsed.replace(second=0)  # Set missing seconds to zero
 
-def generate_daily_intervals(start_str: str, end_str: str) -> List[Dict[str, str]]:
+from datetime import datetime, timedelta
+import jdatetime
+from typing import List, Dict
+
+def parse_jalali_datetime(
+    date_str: str,
+    format_with_sec: str,
+    format_without_sec: str
+) -> jdatetime.datetime:
+    """Parse a Jalali date string, filling missing seconds if needed."""
+    try:
+        return jdatetime.datetime.strptime(date_str, format_with_sec)
+    except ValueError:
+        parsed = jdatetime.datetime.strptime(date_str, format_without_sec)
+        return parsed.replace(second=0)
+
+
+def generate_daily_intervals(
+    start_str: str,
+    end_str: str
+) -> List[Dict[str, str]]:
     """
-    Generate daily intervals with automatic seconds handling
-    Accepts both formats: '1404/02/01 12:30' and '1404/02/01 12:30:45'
+    Generate daily intervals as Gregorian date strings.
+    
+    - start_str, end_str: Jalali strings like '1404/02/10 12:30' or '1404/02/10 12:30:45'
+    - Returns: [{'start_date': 'YYYY/MM/DD HH:MM:SS', 'end_date': 'YYYY/MM/DD HH:MM:SS'}, ...]
     """
-    # Define formats
     primary_format = '%Y/%m/%d %H:%M:%S'
     fallback_format = '%Y/%m/%d %H:%M'
-    
-    try:
-        # Parse with flexible format handling
-        start = parse_jalali_datetime(start_str, primary_format, fallback_format)
-        end = parse_jalali_datetime(end_str, primary_format, fallback_format)
-    except ValueError as e:
-        raise ValueError(
-            f"Invalid date format. Use either {primary_format} or {fallback_format}"
-        ) from e
+
+    jstart = parse_jalali_datetime(start_str, primary_format, fallback_format)
+    jend   = parse_jalali_datetime(end_str,   primary_format, fallback_format)
+
+    start = jstart.togregorian()
+    end   = jend.togregorian()
 
     if start > end:
         raise ValueError("Start date must be before end date")
 
-    intervals = []
+    intervals: List[Dict[str, str]] = []
     current = start
 
     while current <= end:
-        # Start time logic
         day_start = current if current == start else current.replace(
             hour=0, minute=0, second=0
         )
-        
-        # End time logic
+
         if current.date() == end.date():
             day_end = end
         else:
-            day_end = current.replace(
-                hour=23, minute=59, second=59
-            )
+            day_end = current.replace(hour=23, minute=59, second=59)
 
         intervals.append({
             'start_date': day_start.strftime(primary_format),
-            'end_date': day_end.strftime(primary_format)
+            'end_date':   day_end.strftime(primary_format),
         })
 
-        # Move to next day (00:00:00)
         current = day_end + timedelta(seconds=1)
 
     return intervals

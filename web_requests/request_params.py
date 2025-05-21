@@ -6,65 +6,151 @@ def _5_sale_entries_extraction_request_params(serializer, gregorian_now):
 def _h_extract_numbers_request_params(serializer, gregorian_now):
     pass
 
-def _5_call_logs_list_request_params(serializer, gregorian_now):
-    date_gregorian = gregorian_now.date()
 
+def _5_call_logs_list_request_params(serializer, gregorian_now):
+
+    date_gregorian = gregorian_now.date()
     flag_CallDate = (date_gregorian - timedelta(days=1)).strftime('%Y-%m-%d')
-    params_5_call_logs = {
+
+    params = {
         'report': serializer.validated_data.get('report', 1),
         'filter': serializer.validated_data.get('filter', 1),
         'startCallDate': serializer.validated_data.get('startCallDate', f"{flag_CallDate} 00:00:00"),
         'endCallDate': serializer.validated_data.get('endCallDate', f"{flag_CallDate} 23:59:59")
     }
     if 'callLocations' in serializer.validated_data:
-        params_5_call_logs['callLocations'] = serializer.validated_data.get('callLocations', 'Sale')
+        params['callLocations'] = serializer.validated_data.get('callLocations', 'Sale')
 
-    return params_5_call_logs, 'startCallDate', 'endCallDate'
+    return params, 'startCallDate', 'endCallDate'
 
 def _h_call_log_index_request_params(serializer, gregorian_now):
-    date_gregorian = gregorian_now.date()
 
+    date_gregorian = gregorian_now.date()
     flag_CallDate = (date_gregorian - timedelta(days=1)).strftime('%Y-%m-%d')
-    params_h_call_logs = {
+
+    params = {
         'export_data': serializer.validated_data.get('export_data', 1),
-        'filter': serializer.validated_data.get('filter', 1),
         'start_call_from': serializer.validated_data.get('start_call_from', f"{flag_CallDate} 00:00:00"),
         'start_call_to': serializer.validated_data.get('start_call_to', f"{flag_CallDate} 23:59:59"),
     }
     if 'location' in serializer.validated_data:
-        params_h_call_logs['callLocations'] = serializer.validated_data.get('callLocations', 'sale')
+        params['location'] = serializer.validated_data.get('location', 'sale')
         
-    return params_h_call_logs, 'start_call_from', 'start_call_to'
+    return params, 'start_call_from', 'start_call_to'
+
+
 
 def _5_factors_list_request_params(serializer, gregorian_now):
-    pass
-def _h_factor_index_request_params(serializer, gregorian_now):
-    pass
-
-# Primitive under development
-def _h_accounting_call_log_index(serializer, gregorian_now):
     date_gregorian = gregorian_now.date()
-
     flag_CallDate = (date_gregorian - timedelta(days=1)).strftime('%Y-%m-%d')
-    params_h_call_logs = {
+
+    start_dt_prm_name = ""
+    end_dt_prm_name = ""
+
+    params = {
+        'report': serializer.validated_data.get('report', 1),
+        'filter': serializer.validated_data.get('filter', 1),
+    }
+
+    if 'startInvoiceDate' in serializer.validated_data:
+        start_dt_prm_name = 'startInvoiceDate'
+        params['startInvoiceDate'] = serializer.validated_data.get('startInvoiceDate', f"{flag_CallDate} 00:00:00")
+    if 'endInvoiceDate' in serializer.validated_data:
+        end_dt_prm_name = 'endInvoiceDate'
+        params['endInvoiceDate'] = serializer.validated_data.get('endInvoiceDate', f"{flag_CallDate} 23:59:59")
+
+    if 'startPayAcceptDate' in serializer.validated_data:
+        if not start_dt_prm_name:
+            start_dt_prm_name = 'startPayAcceptDate'
+        params['startPayAcceptDate'] = serializer.validated_data.get('startPayAcceptDate', f"{flag_CallDate} 00:00:00")
+    if 'endPayAcceptDate' in serializer.validated_data:
+        if not end_dt_prm_name:
+            end_dt_prm_name = 'endPayAcceptDate'
+        params['endPayAcceptDate'] = serializer.validated_data.get('endPayAcceptDate', f"{flag_CallDate} 23:59:59")
+
+    if 'payStatus' in serializer.validated_data:
+        params['payStatus'] = serializer.validated_data.get('payStatus', "")
+
+
+    return params, start_dt_prm_name, end_dt_prm_name
+
+
+def _h_factor_index_request_params(serializer, gregorian_now):
+
+    date_gregorian = gregorian_now.date()
+    flag_CallDate = (date_gregorian - timedelta(days=1)).strftime('%Y-%m-%d')
+
+    start_dt_prm_name = ""
+    end_dt_prm_name = ""
+
+    params = {
         'export_data': serializer.validated_data.get('export_data', 1),
-        'call_type[]': serializer.validated_data.get('filter', ["1"]),
+    }
+
+    if 'start_created_at' in serializer.validated_data:
+        start_dt_prm_name = 'start_created_at'
+        params['start_created_at'] = serializer.validated_data.get('start_created_at', f"{flag_CallDate} 00:00:00")
+    if 'end_created_at' in serializer.validated_data:
+        end_dt_prm_name = 'end_created_at'
+        params['end_created_at'] = serializer.validated_data.get('end_created_at', f"{flag_CallDate} 23:59:59")
+
+    if 'start_accept_action_date' in serializer.validated_data:
+        if not start_dt_prm_name:
+            start_dt_prm_name = 'start_accept_action_date'
+        params['start_accept_action_date'] = serializer.validated_data.get('start_accept_action_date', f"{flag_CallDate} 00:00:00")
+    if 'end_accept_action_date' in serializer.validated_data:
+        if not end_dt_prm_name:
+            end_dt_prm_name = 'end_accept_action_date'
+        params['end_accept_action_date'] = serializer.validated_data.get('end_accept_action_date', f"{flag_CallDate} 23:59:59")
+
+    if 'status' in serializer.validated_data:
+        params['status'] = serializer.validated_data.get('status', "")
+
+    if 'receipt_status' in serializer.validated_data:
+        params['receipt_status'] = serializer.validated_data.get('receipt_status', "")
+
+    return params, start_dt_prm_name, end_dt_prm_name
+
+
+
+def _h_accounting_call_log_index(serializer, gregorian_now):
+
+    date_gregorian = gregorian_now.date()
+    flag_CallDate = (date_gregorian - timedelta(days=1)).strftime('%Y-%m-%d')
+
+    params = {
+        'export_data': serializer.validated_data.get('export_data', 1),
+        'call_type[]': serializer.validated_data.get('call_type', ""),
         'start_at': serializer.validated_data.get('start_at', f"{flag_CallDate} 00:00:00"),
         'end_at': serializer.validated_data.get('end_at', f"{flag_CallDate} 23:59:59"),
     }
-    return params_h_call_logs, 'start_call_from', 'start_call_to'
+    return params, 'start_at', 'end_at'
+
+
 
 def _h_reservation_index(serializer, gregorian_now):
-    date_gregorian = gregorian_now.date()
 
+    date_gregorian = gregorian_now.date()
     flag_CallDate = (date_gregorian - timedelta(days=1)).strftime('%Y-%m-%d')
-    params_h_call_logs = {
+
+    start_dt_prm_name = ""
+    end_dt_prm_name = ""
+
+    params = {
         'export_data': serializer.validated_data.get('export_data', 1),
-        'filter': serializer.validated_data.get('filter', 1),
-        'start_call_from': serializer.validated_data.get('start_call_from', f"{flag_CallDate} 00:00:00"),
-        'start_call_to': serializer.validated_data.get('start_call_to', f"{flag_CallDate} 23:59:59"),
     }
-    if 'location' in serializer.validated_data:
-        params_h_call_logs['callLocations'] = serializer.validated_data.get('callLocations', 'sale')
-        
-    return params_h_call_logs, 'start_call_from', 'start_call_to'
+    if 'start_created_at' in serializer.validated_data:
+        start_dt_prm_name = 'start_created_at'
+        params['start_created_at'] = serializer.validated_data.get('start_created_at', f"{flag_CallDate} 00:00:00")
+    if 'end_created_at' in serializer.validated_data:
+        end_dt_prm_name = 'end_created_at'
+        params['end_created_at'] = serializer.validated_data.get('end_created_at', f"{flag_CallDate} 23:59:59")
+
+    if 'start_reserved_at' in serializer.validated_data:
+        start_dt_prm_name = 'start_reserved_at'
+        params['start_reserved_at'] = serializer.validated_data.get('start_reserved_at', f"{flag_CallDate} 00:00:00")
+    if 'end_reserved_at' in serializer.validated_data:
+        end_dt_prm_name = 'end_reserved_at'
+        params['end_reserved_at'] = serializer.validated_data.get('end_reserved_at', f"{flag_CallDate} 23:59:59")
+
+    return params, start_dt_prm_name, end_dt_prm_name

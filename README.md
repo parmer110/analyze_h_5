@@ -10,8 +10,13 @@ This project is designed to handle web page request simulations and generate res
    git clone https://github.com/parmer110/analyze_h_5.git
    cd m10
 
-## How to Run the Project
 
+## How to Initialize Project
+1. **Start the Django development server:**
+   ```sh
+   docker start my-redis
+
+## How to Run the Project
 1. **Start the Django development server:**
    ```sh
    env\scripts\activate

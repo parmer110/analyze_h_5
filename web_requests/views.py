@@ -51,7 +51,9 @@ from .request_params import (
     _5_call_logs_list_request_params,
     _h_call_log_index_request_params,
     _5_factors_list_request_params,
-    _h_factor_index_request_params
+    _h_factor_index_request_params,
+    _h_accounting_call_log_index,
+    _h_reservation_index,
 )
 
 
@@ -326,6 +328,7 @@ class RefreshSessionViewSet5040(viewsets.ViewSet):
         )
 
     async def refresh_5_async(self, request, username, token, loginExpire, is_internal):
+        refresh_kwargs = {}
         try:
             user = await sync_to_async(User.objects.get)(username=username)
         except User.DoesNotExist:
@@ -365,7 +368,7 @@ class RefreshSessionViewSet5040(viewsets.ViewSet):
                 request.session['count_refresh_5'] = count_refresh_5
             if is_internal:
                 await sync_to_async(schedule_refresh_job, thread_sensitive=True)(
-                    user, refresh_kwargs, interval_minutes=2
+                    user, refresh_kwargs
                 )
             return Response(
                 {'status': 'Session expired; please login again.'},
@@ -386,11 +389,12 @@ class RefreshSessionViewSet5040(viewsets.ViewSet):
                 )(value=c['value'])
 
         # Reschedule the next refresh
-        if is_internal:
+        # For Security
+        if is_internal or True: # Debug! 
             await sync_to_async(schedule_refresh_job, thread_sensitive=True)(
                 user, refresh_kwargs
             )
-        return Response({'status': 'Refreshed successfully'})
+        return Response({'Result': 'Refreshed successfully', 'status': 212})
 
 
 class LogoutViewSet5040(viewsets.ViewSet):
@@ -439,6 +443,15 @@ class cm10(viewsets.ViewSet):
             #region Initialization
             # Request executation duration time
             starting_time = time.time()
+            username = request.GET.get('username')
+            try:
+                user = User.objects.get(username=username)
+            except User.DoesNotExist:
+                # Return error if user is not found
+                return Response(
+                    {'message': f"User {username} does not exist!"},
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
             # Directories path
             shared_dir = r'C:\Users\eshraghi\Documents\esh\share\cm10\temp'
             calc_file_path = r'C:\Users\eshraghi\Documents\esh\share\cm10\source\میسکال  مشاوران - Main.xlsb'
@@ -632,7 +645,7 @@ class cm10(viewsets.ViewSet):
 
             log = RequestLog.objects.create(
                 request_name="cm10",
-                username=request.session.get('username_h'),
+                username=user.username,
                 request_type='POST',
                 request_data=serializer.validated_data,
                 response_data=response_data if response.headers.get('Content-Type') == 'application/json' else None,
@@ -670,6 +683,16 @@ class c_sup(viewsets.ViewSet):
             #region Initialization
             # Request executation duration time
             starting_time = time.time()
+            username = request.GET.get('username')
+            try:
+                user = User.objects.get(username=username)
+            except User.DoesNotExist:
+                # Return error if user is not found
+                return Response(
+                    {'message': f"User {username} does not exist!"},
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+                
             # Directories path
             shared_dir = r'C:\Users\eshraghi\Documents\esh\share\c_sup\temp'
             calc_file_path = r'C:\Users\eshraghi\Documents\esh\share\c_sup\source\misscall--Poshtiban-MAIN.xlsb'
@@ -839,7 +862,7 @@ class c_sup(viewsets.ViewSet):
 
             log = RequestLog.objects.create(
                 request_name="c_sup",
-                username=request.session.get('username_h'),
+                username=user.username,
                 request_type='POST',
                 request_data=serializer.validated_data,
                 response_data=response_data if response.headers.get('Content-Type') == 'application/json' else None,
@@ -1086,8 +1109,8 @@ class archive(viewsets.ViewSet):
         starting_time = time.time()
         now_jalali = jdatetime.datetime.now()
         formatted_jalali_date = now_jalali.strftime('%Y_%m_%d_%H_%M_%S')
-        shared_dir = r'C:\Users\eshraghi\Documents\esh\share\archive'
-        shared_dir = os.path.join(shared_dir, formatted_jalali_date)
+        base_shared_dir = r'C:\Users\eshraghi\Documents\esh\share\archive'
+        base_shared_dir = os.path.join(base_shared_dir, formatted_jalali_date)
 
         username = request.query_params.get('username')
         try:
@@ -1115,21 +1138,28 @@ class archive(viewsets.ViewSet):
             )
         
         headers_5 = {
-            'Authorization': f'Bearer {token_5}',
-            'loginExpire': loginExpire_5
+            'Authorization': f'Bearer {token_5}'
+            # 'loginExpire': loginExpire_5
         }
         headers_h = {
             'Authorization': f'Bearer {token_h}'
         }
 
         # Functions requesting web_app
+        # Will made automization
         request_handler_map = {
             ('5040', 'sale/entries/extraction'): _5_sale_entries_extraction_request_params,
-            ('5040', 'call/logs/list'): _5_call_logs_list_request_params,
-            ('5040', 'factor/index'): _5_factors_list_request_params,
             ('hamkadeh', 'entry/extract-numbers'): _h_extract_numbers_request_params,
+
+            ('5040', 'call/logs/list'): _5_call_logs_list_request_params,
             ('hamkadeh', 'call-log/index'): _h_call_log_index_request_params,
-            ('hamkadeh', 'factors/list'): _h_factor_index_request_params,
+
+            ('5040', 'factors/list'): _5_factors_list_request_params,
+            ('hamkadeh', 'factor/index'): _h_factor_index_request_params,
+
+            ('hamkadeh', 'accounting/call-log/index'): _h_accounting_call_log_index,
+
+            ('hamkadeh', 'reservation/index'): _h_reservation_index,
         }
 
         # Dynamic Serializer: Iteration loop over each company-name request perform data valication and initalize.
@@ -1139,11 +1169,14 @@ class archive(viewsets.ViewSet):
 
             company = req.get("company").lower()
             name = req.get("name").lower()
+            dir_hlp_name = req.get("directory_helper")
             body_parameters = req.get("body", None)
             query_parameters = req.get("query", None)
 
-            shared_dir = os.path.join(shared_dir, sanitize_filename(company))
+            shared_dir = os.path.join(base_shared_dir, sanitize_filename(company))
             shared_dir = os.path.join(shared_dir, sanitize_filename(name))
+            if dir_hlp_name:
+                shared_dir = os.path.join(shared_dir, sanitize_filename(dir_hlp_name))
             
             os.makedirs(shared_dir, exist_ok=True)
 
@@ -1194,11 +1227,13 @@ class archive(viewsets.ViewSet):
 
                 expanded_tasks.append((method, url, headers, new_params,interval['start_date'], interval['end_date'], shared_dir))
 
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
+        # Lock
+        lock = threading.Lock()
+        responseflag = False # 5040 response failure handler
+        with concurrent.futures.ThreadPoolExecutor(max_workers=60) as executor:
             event = threading.Event()
             futures = [
-                executor.submit(handle_request, method, url, headers, params, start_date, end_date, shared_dir)
+                executor.submit(handle_request, method, url, headers, params, start_date, end_date, shared_dir, lock, responseflag)
                 for method, url, headers, params, start_date, end_date, shared_dir in expanded_tasks
             ]
 
@@ -1217,10 +1252,9 @@ class archive(viewsets.ViewSet):
                 # except ValueError as e:
                 #     logging.error("Error reading Excel file: %s", e)
                 #     return Response({'issue': f'Error reading Excel file: {e}', 'status': 400})
-
                 
                 if result.ok:
-                    logger.debug(f"Success fetching {company}'s {name} report in {start_date} to {end_date}.")
+                    print(f"☻☻Success fetching {company}'s {name} report in {start_date} to {end_date}.☺☺")
 
                     content_disp = result.headers.get('Content-Disposition')
                     # print(">> Content-Disposition header:", repr(content_disp))
@@ -1228,11 +1262,13 @@ class archive(viewsets.ViewSet):
                     # print(content_disp)
 
                     # بافل regex
-                    raw_name  = extract_filename(content_disp)
-                    if raw_name is None and content_disp:
-                        raw_name = fallback_extract(content_disp)                
+                    # raw_name  = extract_filename(content_disp)
+                    # if raw_name is None and content_disp:
+                    #     raw_name = fallback_extract(content_disp)
                     
                     # Convert Date times from gregorian to Jalali which first converting object from string
+                    # print("→→→Last margin←←←")
+                    # print(f'start_date: {start_date}, end_date: {end_date}')
                     start_date = datetime.datetime.strptime(start_date, '%Y/%m/%d %H:%M:%S')
                     start_date = jdatetime.datetime.fromgregorian(date=start_date).strftime('%Y_%m_%d_%H_%M_%S')
 
@@ -1241,19 +1277,25 @@ class archive(viewsets.ViewSet):
 
                     file_suffix = f"{start_date}__{end_date}"
 
-                    if raw_name:
-                        raw_name = remove_all_extensions(raw_name)
-                        clean_name = sanitize_filename(raw_name)
-                        filename   = f"{clean_name}_{file_suffix}.xlsx"
-                    else:
-                        filename   = f"response_{file_suffix}.xlsx"
+                    # if raw_name:
+                    #     raw_name = remove_all_extensions(raw_name)
+                    #     clean_name = sanitize_filename(raw_name)
+                    #     filename   = f"{clean_name}_{file_suffix}.xlsx"
+                    # else:
+                    #     filename   = f"response_{file_suffix}.xlsx"
+
+                    clean_name = sanitize_filename(name)
+                    filename   = f"{clean_name}_{file_suffix}.xlsx"
 
                     # Save exported file 
                     file_path = os.path.join(shared_dir, filename)
                     with open(file_path, 'wb') as f:
                         f.write(result.content)
                 else:
-                    logger.error(f"Error in fetching {company}'s {name} report in {start_date} to {end_date}!")
+                    logger.error(
+                        f"Error in fetching {company}'s {name} report in {start_date} to {end_date} "
+                        f"expected in {shared_dir}'s directory!"
+                    )                    
 
         ext_duration = datetime.timedelta(seconds=time.time() - starting_time)
 

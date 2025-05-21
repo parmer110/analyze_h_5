@@ -1,41 +1,21 @@
 import jdatetime
+import datetime
 from rest_framework import serializers
 
-
 class JalaliDateTimeField(serializers.Field):
-    """
-    Custom field for Jalali DateTime conversion with time preservation
-    - Accepts multiple Jalali datetime formats
-    - Converts to Gregorian datetime while preserving time
-    - Handles default time values for missing time components
-    """
-    
     DEFAULT_FORMATS = [
-        '%Y-%m-%d %H:%M:%S',  # Full format with seconds
-        '%Y-%m-%d %H:%M',     # Without seconds
-        '%Y-%m-%d'             # Date only
+        '%Y/%m/%d %H:%M:%S',  # Full format with seconds
+        '%Y/%m/%d %H:%M',     # Without seconds
+        '%Y/%m/%d',           # Date only
     ]
-    
+
     def __init__(self, formats=None, default_time=None, *args, **kwargs):
-        """
-        :param formats: List of accepted Jalali formats
-        :param default_time: Tuple (hour, minute, second) for missing time
-        """
         self.formats = formats or self.DEFAULT_FORMATS
         self.default_time = default_time or (0, 0, 0)
         super().__init__(*args, **kwargs)
 
-    def to_representation(self, value):
-        """Convert Gregorian datetime to Jalali string with original format"""
-        if value is None:
-            return None
-            
-        # Preserve original time components
-        jalali_dt = jdatetime.datetime.fromgregorian(datetime=value)
-        return jalali_dt.strftime(self.formats[0])
-
     def to_internal_value(self, data):
-        """Convert Jalali string to Gregorian datetime with time handling"""
+        # 1. Parse as Jalali datetime
         for fmt in self.formats:
             try:
                 parsed = jdatetime.datetime.strptime(data, fmt)
@@ -44,10 +24,10 @@ class JalaliDateTimeField(serializers.Field):
                 continue
         else:
             raise serializers.ValidationError(
-                f"Invalid format. Allowed formats: {', '.join(self.formats)}"
+                f"Invalid format. Allowed: {', '.join(self.formats)}"
             )
 
-        # Apply default time if needed
+        # 2. Apply default time if missing
         if parsed.hour == 0 and parsed.minute == 0 and parsed.second == 0:
             parsed = parsed.replace(
                 hour=self.default_time[0],
@@ -55,7 +35,19 @@ class JalaliDateTimeField(serializers.Field):
                 second=self.default_time[2]
             )
 
-        return parsed.togregorian()
+        # 3. Return the Jalali object itself (not togregorian)
+        return parsed
+
+    def to_representation(self, value):
+        if value is None:
+            return None
+        # Convert Gregorian datetime back to Jalali if needed
+        if isinstance(value, datetime.datetime):
+            jalali_dt = jdatetime.datetime.fromgregorian(datetime=value)
+        else:
+            jalali_dt = value  # already a jdatetime
+        return jalali_dt.strftime(self.formats[0])
+
 
 class DynamicRequestSerializer(serializers.Serializer):
 
@@ -65,8 +57,8 @@ class DynamicRequestSerializer(serializers.Serializer):
         "boolean": serializers.BooleanField,
         "date": serializers.DateField,
         "jdate": lambda **kwargs: JalaliDateTimeField(formats=['%Y/%m/%d %H:%M:%S'], **kwargs),
-        "list_string": lambda: serializers.ListField(child=serializers.CharField()),
-        "list_integer": lambda: serializers.ListField(child=serializers.IntegerField())
+        "list_string": lambda **kwargs: serializers.ListField(child=serializers.CharField(), **kwargs),
+        "list_integer": lambda **kwargs: serializers.ListField(child=serializers.IntegerField(), **kwargs)
     }
         
     def __init__(self, *args, **kwargs):
