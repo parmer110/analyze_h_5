@@ -1,12 +1,5 @@
 from rest_framework import serializers
 
-# Logging in
-
-class LoginSerializer(serializers.Serializer):
-    username = serializers.CharField()
-    password = serializers.CharField(required=False, default=serializers.empty)
-    code = serializers.CharField()
-
 class AccountingCallLog(serializers.Serializer):
     export_data = serializers.CharField(required=False)
     call_type = serializers.ListField(child=serializers.CharField(), required=False)

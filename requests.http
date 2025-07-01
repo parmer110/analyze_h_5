@@ -1,0 +1,35 @@
+# Logging on Hamkadeh
+POST http://192.168.134.10:8002/web_requests/h/login/
+Content-Type: application/json
+
+{
+    "username": "aeshraghi",
+    "password": "123456",
+    "type": "sms"
+}
+
+# "type": "voip"
+
+###
+
+# Logging on 5040
+POST http://192.168.134.10:8002/web_requests/5/login/
+Content-Type: application/json
+
+{
+    "username": "aeshraghi",
+    "password": "123456",
+    "type": "test"
+}
+
+# Hamkadeh request: supplier missedcalls
+###
+POST http://192.168.134.10:8002/web_requests/h/c_sup/?username=aeshraghi
+Content-Type: application/json
+
+{
+
+}
+
+
+###

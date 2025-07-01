@@ -35,10 +35,11 @@ from django_q.tasks import schedule
 from django_q.models import Schedule
 from django.core.exceptions import ObjectDoesNotExist
 import concurrent.futures
-from .serializers_h import (LoginSerializer, AccountingCallLog, 
+from redlock import Redlock
+from .serializers_h import (AccountingCallLog, 
                           EntriesExtraction_f)
 from .serializers_5 import (FactorsList, EntriesExtraction_5)
-from .serializers import DynamicRequestSerializer, SendCodeSerializer
+from .serializers import DynamicRequestSerializer, LoginSerializer
 from .models import RequestLog, Requests, WebTokens, RequestsForeign
 from common.models import User, Companies
 from scheduler.tasks import open_browser
@@ -59,22 +60,6 @@ from .request_params import (
 
 logger = logging.getLogger(__name__)
 
-
-class SendSMSCodeViewSeHamkadeh(viewsets.ViewSet):
-    def create(self, request):
-        serializer = SendCodeSerializer(data=request.data)
-        if serializer.is_valid():
-            response = requests.post('https://api.hamkadeh.com/api/auth/login/send-code', json=serializer.validated_data)
-            log = RequestLog.objects.create(
-                request_name = 'Send SMS Hamkahdeh',
-                username=serializer.validated_data['username'],
-                request_type='send_code',
-                request_data=serializer.validated_data,
-                response_data=response.json()
-            )
-            return Response(response.json())
-        return Response(serializer.errors, status=400)
-
 class LoginViewSetHamkadeh(viewsets.ViewSet):
     def create(self, request):
         serializer = LoginSerializer(data=request.data)
@@ -90,7 +75,22 @@ class LoginViewSetHamkadeh(viewsets.ViewSet):
                     status=status.HTTP_401_UNAUTHORIZED
                 )
 
-            response = requests.post('https://api.hamkadeh.com/api/auth/login', json=serializer.validated_data)
+            response = requests.post('https://api.hamkadeh.com/api/auth/login/send-code', json=serializer.validated_data)
+
+            # Prompt user input for SMS code
+            sms_code = None
+            while not sms_code:
+                code = input("Enter the SMS code: ")
+                if code.isdigit():
+                    sms_code = code
+            
+            login_data = {
+                "username": serializer.validated_data["username"],
+                "password": serializer.validated_data["password"],
+                "sms_code": sms_code
+            }
+
+            response = requests.post('https://api.hamkadeh.com/api/auth/login', json=login_data)
             log = RequestLog.objects.create(
                 request_name = 'login Hamkadeh',
                 username=serializer.validated_data['username'],
@@ -98,12 +98,6 @@ class LoginViewSetHamkadeh(viewsets.ViewSet):
                 request_data=serializer.validated_data,
                 response_data=response.json()
             )
-
-            ### Temporary marking: Authentication implement.
-            # if request.user.username == username:
-            #     pass
-            # else:
-            #     return Response("Username Error", status=411)
 
             token_h = response.json().get('token')
             if token_h:
@@ -683,7 +677,8 @@ class c_sup(viewsets.ViewSet):
             #region Initialization
             # Request executation duration time
             starting_time = time.time()
-            username = request.GET.get('username')
+            username = request.query_params.get('username')
+
             try:
                 user = User.objects.get(username=username)
             except User.DoesNotExist:
@@ -1096,7 +1091,7 @@ class noname(viewsets.ViewSet):
             f.write(response.content)
 
 
-class archive(viewsets.ViewSet):
+class ArchiveViewSet(viewsets.ViewSet):
     def create(self, request):
 
         # Initialization
@@ -1225,16 +1220,15 @@ class archive(viewsets.ViewSet):
                 new_params[start_date_name] = interval['start_date']
                 new_params[end_date_name] = interval['end_date']
 
-                expanded_tasks.append((method, url, headers, new_params,interval['start_date'], interval['end_date'], shared_dir))
+                expanded_tasks.append((
+                    method, url, headers, new_params, interval['start_date'], interval['end_date'], shared_dir, company, name
+                ))
 
-        # Lock
-        lock = threading.Lock()
-        responseflag = False # 5040 response failure handler
         with concurrent.futures.ThreadPoolExecutor(max_workers=60) as executor:
             event = threading.Event()
             futures = [
-                executor.submit(handle_request, method, url, headers, params, start_date, end_date, shared_dir, lock, responseflag)
-                for method, url, headers, params, start_date, end_date, shared_dir in expanded_tasks
+                executor.submit(handle_request, method, url, headers, params, start_date, end_date, shared_dir, company, name)
+                for method, url, headers, params, start_date, end_date, shared_dir, company, name in expanded_tasks
             ]
 
             completed_tasks_counter = 0
@@ -1245,7 +1239,7 @@ class archive(viewsets.ViewSet):
                 completed_tasks_counter += 1
                 completed_tasks.append(future.result())
 
-                result, start_date, end_date, shared_dir = future.result()
+                result, start_date, end_date, shared_dir, company, name = future.result()
 
                 # try:
                 #     downloaded_df = pd.read_excel(BytesIO(result.content))
@@ -1253,7 +1247,7 @@ class archive(viewsets.ViewSet):
                 #     logging.error("Error reading Excel file: %s", e)
                 #     return Response({'issue': f'Error reading Excel file: {e}', 'status': 400})
                 
-                if result.ok:
+                if result is not None and result.ok:
                     print(f"☻☻Success fetching {company}'s {name} report in {start_date} to {end_date}.☺☺")
 
                     content_disp = result.headers.get('Content-Disposition')
@@ -1305,3 +1299,4 @@ class archive(viewsets.ViewSet):
         }                
 
         return Response(response_data, status=201)
+    

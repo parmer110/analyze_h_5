@@ -7,6 +7,7 @@ from datetime import timedelta
 from typing import List, Dict
 from email.parser import HeaderParser
 from urllib.parse import unquote
+from common.locks import redlock_instance
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +29,60 @@ def fetch_data():
     response = requests.post(url, params=params, headers=headers)
     return response.content
 
-def handle_request(method, url, headers, data, start_date, end_date, shared_dir, lock, responseflag):
+
+def run_once_under_lock(lock_key: str,
+                       lock_ttl_ms: int,
+                       block_timeout_s: int,
+                       action_fn,
+                       *action_args,
+                       **action_kwargs):
+    """
+    Acquire a distributed lock (via redlock-py) identified by lock_key.
+    - If first to acquire, run action_fn(*action_args, **action_kwargs).
+    - Others block until the first finishes, then skip action_fn.
+    """
+    # create the lock object
+    lock = redlock_instance.lock(lock_key, lock_ttl_ms)
+
+    # non-blocking try: only first caller succeeds
+    is_first = lock.acquire(blocking=False)
+    if is_first:
+        try:
+            logger.info(f"[Lock:{lock_key}] First caller: running action.")
+            action_fn(*action_args, **action_kwargs)
+        except Exception as exc:
+            logger.error(f"[Lock:{lock_key}] Action failed: {exc}")
+            raise
+        finally:
+            try:
+                redlock_instance.unlock(lock)
+                logger.info(f"[Lock:{lock_key}] Lock released by first caller.")
+            except Exception as e:
+                logger.error(f"[Lock:{lock_key}] Failed to release lock: {e}")
+    else:
+        # block until the first caller releases
+        logger.info(f"[Lock:{lock_key}] Waiting for first caller to finish...")
+        lock.acquire(blocking=True, blocking_timeout=block_timeout_s)
+        # immediately release and skip action
+        lock.release()
+        logger.info(f"[Lock:{lock_key}] Continuing without running action.")
+
+def _perform_refresh(username: str):
+    """
+    The actual refresh HTTP call.
+    """
+    resp = requests.get(
+        f"http://192.168.134.10:8002/web_requests/5/refresh/?username={username}",
+        timeout=300
+    )
+    resp.raise_for_status()
+    logger.info(f"[Refresh] Completed with status {resp.status_code}")
+
+def handle_request(method, url, headers, data, start_date, end_date, shared_dir, company, name):
     response = None
     counter = 0
     if method == 'GET':
-        while (not response or not response.ok) and counter <= 3:
+        while (not response or not response.ok) and counter <= 0:
             counter += 1
 
             logger.info(f"Attempting GET request to {url} with headers {headers} and params {data}.")
@@ -40,35 +90,37 @@ def handle_request(method, url, headers, data, start_date, end_date, shared_dir,
             try:
                 print(f'→ count: {counter}, url: {url}, start date: {start_date}, end date: {end_date}←')
                 response = requests.get(url, headers=headers, params=data, timeout=1200)
+                print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
+                print(response)
             except requests.exceptions.ConnectionError:
+                print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
+                print("requests.exceptions.ConnectionError")
                 response = None
             except requests.exceptions.Timeout:
+                print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
+                print("requests.exceptions.Timeout")
                 response = None
-            
-            if response is not None and response.ok:
-                # print(f"GET request to {response.url} Header is {headers} Succeeded with status code {response.status_code}.")
-                logger.info(f"GET request to {response.url} succeeded with status code {response.status_code}.")
-            else:
-                if response:
-                    logger.error(f"GET request to {response.url} failed with status code {response.status_code}.")
+            finally:
+                if response is None:
+                    logger.error(
+                        f"GET request to {url}, start_date: {start_date}, end_date: {end_date} failed: no response"
+                    )
+                elif response.ok:
+                    # status_code < 400
+                    logger.info(f"GET to {response.url} succeeded: status {response.status_code}")
                 else:
-                    logger.error(f"GET request to {url}, start date: {start_date}, end date: {end_date} failed 666!!!")
-                # Perform tokens updatation while request issued.
-                if url.split('.')[1] == "5040":
-                    if responseflag:
-                        print(f'5040 issue→→→→Locked←←←←, url: {url}, start date: {start_date}, end date: {end_date} ')
-                        lock.acquire()
-                        lock.release()
-                        print(f'5040 issue→→→→Locke ♥♥Release♥♥←←←←, url: {url}, start date: {start_date}, end date: {end_date} ')
-                    else:
-                        lock.acquire()
-                        responseflag = True
-                        response_temp = requests.get('http://192.168.134.10:8002/web_requests/5/refresh/?username=aeshraghi', timeout=300)
-                        responseflag = False
-                        lock.release()
-                        print(f'5040 Refreshing→→→→{response_temp}←←←←')
-                    
-                # Perform tokens updatation while request issued.
+                    # response موجود اما خطای HTTP (status_code >= 400)
+                    logger.error(f"GET to {response.url} failed: status {response.status_code}")
+                    # Perform tokens updatation while request issued.
+                    if "5040" in url:
+                        continue
+                        run_once_under_lock(
+                            lock_key="refresh_lock_5040",
+                            lock_ttl_ms=300_000,
+                            block_timeout_s=310,
+                            action_fn=_perform_refresh,
+                            username="aeshraghi"
+                        )
 
     elif method == 'POST':
         while (not response or not response.ok) and counter <= 3:
@@ -94,27 +146,21 @@ def handle_request(method, url, headers, data, start_date, end_date, shared_dir,
                 else:
                     logger.error(f"POST request to {url}, start date: {start_date}, end date: {end_date} failed 666!!!")
                 # Perform tokens updatation while request issued.
-                if url.split('.')[1] == "5040":
-                    # response_temp = requests.get('http://192.168.134.10:8002/web_requests/5/refresh/?username=aeshraghi', timeout=300)
-                    # print(f'→→→→{response_temp}←←←←')
-                    pass
-        
+                if "5040" in url:
+                    continue
+                    run_once_under_lock(
+                        lock_key="refresh_lock_5040",
+                        lock_ttl_ms=300_000,
+                        block_timeout_s=310,
+                        action_fn=_perform_refresh,
+                        username="aeshraghi"
+                    )
+       
     counter = 0
 
-    print(f"request to {response.url} Header is {headers} with status code {response.status_code}.")
-    return response, start_date, end_date, shared_dir
+    # print(f"request to {response.url} Header is {headers} with status code {response.status_code}.")
+    return response, start_date, end_date, shared_dir, company, name
 
-def parse_jalali_datetime(date_str: str, format_with_sec: str, format_without_sec: str) -> jdatetime.datetime:
-    """Parse Jalali date string with flexible seconds handling"""
-    try:
-        return jdatetime.datetime.strptime(date_str, format_with_sec)
-    except ValueError:
-        parsed = jdatetime.datetime.strptime(date_str, format_without_sec)
-        return parsed.replace(second=0)  # Set missing seconds to zero
-
-from datetime import datetime, timedelta
-import jdatetime
-from typing import List, Dict
 
 def parse_jalali_datetime(
     date_str: str,

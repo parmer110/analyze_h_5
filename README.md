@@ -26,6 +26,7 @@ This project is designed to handle web page request simulations and generate res
    uvicorn m10.asgi:application --reload --host 0.0.0.0 --port 8002
    celery -A m10  worker --loglevel=info # celery -A m10 worker --loglevel=info --pool=solo
    celery -A m10 flower
+   docker run --name my-redis -p 6379:6379 -d redis
 
 #### Dependencies
 List the main dependencies required for the project.

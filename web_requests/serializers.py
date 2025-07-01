@@ -73,7 +73,7 @@ class DynamicRequestSerializer(serializers.Serializer):
             for param, type in request_foreign.get_body_parameters().items():
                 self.fields[param] = self.type_mapping[type](required=False)
 
-class SendCodeSerializer(serializers.Serializer):
+class LoginSerializer(serializers.Serializer):
     username = serializers.CharField()
     password = serializers.CharField()
     type = serializers.CharField()
