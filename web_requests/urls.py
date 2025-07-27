@@ -1,7 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
-    SendSMSCodeViewSeHamkadeh, LoginViewSetHamkadeh, LoginViewSet5040, RefreshSessionViewSet5040, LogoutViewSet5040,
+    LoginViewSetHamkadeh, LoginViewSet5040, RefreshSessionViewSet5040, LogoutViewSet5040,
     cm10, c_sup,
     noname, ArchiveViewSet,
     run, openning_home_browser

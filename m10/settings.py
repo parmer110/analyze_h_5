@@ -117,7 +117,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Celery
 # CELERY_BROKER_URL = config('BROKER_URL')
-# CELERY_BROKER_URL = 'amqp://parmer_110:Aa4812@@192.168.134.44:5672/cm10_vhost'
+# CELERY_BROKER_URL = 'amqp://parmer_110:Aa4812@@192.168.134.133:5672/cm10_vhost'
 CELERY_BROKER_URL = 'amqp://parmer_110:Aa4812@localhost:5672/'
 CELERY_RESULT_BACKEND = 'rpc://'
 CELERY_WORKER_CONCURRENCY = 4

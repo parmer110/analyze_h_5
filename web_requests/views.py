@@ -13,6 +13,7 @@ import logging
 import ast
 import threading
 import copy
+from django.http import JsonResponse
 from django.http import HttpResponse
 from django.utils import timezone
 from datetime import timedelta
@@ -34,8 +35,10 @@ from channels.db import database_sync_to_async
 from django_q.tasks import schedule
 from django_q.models import Schedule
 from django.core.exceptions import ObjectDoesNotExist
-import concurrent.futures
 from redlock import Redlock
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
 from .serializers_h import (AccountingCallLog, 
                           EntriesExtraction_f)
 from .serializers_5 import (FactorsList, EntriesExtraction_5)
@@ -119,7 +122,7 @@ def schedule_refresh_job(user, kwargs, interval_minutes=None):
     """
     task_name = f"web_request_5040_refresh_{user.username}"
     now = timezone.now()
-    minutes = interval_minutes if interval_minutes is not None else random.randint(5, 45)
+    minutes = interval_minutes if interval_minutes is not None else random.randint(5, 40)
     seconds = random.randint(0, 59)
     try:
         # Update existing schedule
@@ -186,7 +189,7 @@ class LoginViewSet5040(viewsets.ViewSet):
     ViewSet to handle initial 5040 login and schedule refresh.
     """
     def create(self, request):
-        serializer = SendCodeSerializer(data=request.data)
+        serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         username = serializer.validated_data['username']
         password = serializer.validated_data['password']
@@ -277,16 +280,17 @@ async def run_playwright_for_refresh(token, loginExpire):
             page = context.new_page()
 
             max_retries = 3
-            delay = 5  # seconds            
+            delay = random.randint(2 * 60, 7 * 60)  # seconds
 
             for attempt in range(max_retries):
                 try:
                     page.goto('https://panel.5040.me/', timeout=60000)
                     break  # Exit the loop if successful
                 except Exception as e:
-                    logging.error(f'Error navigating to URL: {e}')
+                    current_time = datetime.datetime.now().strftime('%H:%M:%S')
+                    logging.error(f"→→ Error found: page.goto, in {current_time})←← navigating to URL: {e}")
                     if attempt < max_retries:
-                        logging.info(f'Retrying in {delay} seconds...')
+                        logging.error(f'Retrying in {delay} seconds...')
                         time.sleep(delay)
                     else:
                         logging.error('Max retries reached, giving up.')
@@ -687,7 +691,16 @@ class c_sup(viewsets.ViewSet):
                     {'message': f"User {username} does not exist!"},
                     status=status.HTTP_401_UNAUTHORIZED
                 )
-                
+            
+            # Login's token
+            try:
+                token_h = WebTokens.objects.get(user=user, name='token_5').value
+            except WebTokens.DoesNotExist:
+                return Response(
+                    {'message': 'Tokens missing'},
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+
             # Directories path
             shared_dir = r'C:\Users\eshraghi\Documents\esh\share\c_sup\temp'
             calc_file_path = r'C:\Users\eshraghi\Documents\esh\share\c_sup\source\misscall--Poshtiban-MAIN.xlsb'
@@ -889,7 +902,7 @@ def openning_home_browser(request):
         user = User.objects.get(username=username)
     except User.DoesNotExist:
         # Return error if user does not exist
-        return Response(
+        return JsonResponse(
             {'message': 'User not found'},
             status=status.HTTP_401_UNAUTHORIZED
         )
@@ -904,7 +917,6 @@ def openning_home_browser(request):
                 {'message': 'Tokens missing'},
                 status=status.HTTP_401_UNAUTHORIZED
             )
- 
     driver = webdriver.Chrome()
 
     driver.get('https://panel.5040.me')
@@ -1223,79 +1235,114 @@ class ArchiveViewSet(viewsets.ViewSet):
                 expanded_tasks.append((
                     method, url, headers, new_params, interval['start_date'], interval['end_date'], shared_dir, company, name
                 ))
+        
+        max_retries = 5
+        retry_count = 0
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=60) as executor:
-            event = threading.Event()
-            futures = [
-                executor.submit(handle_request, method, url, headers, params, start_date, end_date, shared_dir, company, name)
-                for method, url, headers, params, start_date, end_date, shared_dir, company, name in expanded_tasks
-            ]
+        while expanded_tasks and retry_count < max_retries:
+            delay = random.randint(1 * 60, 10 * 60)  # seconds
+            retry_count += 1
 
-            completed_tasks_counter = 0
-            completed_tasks = []
+            if retry_count > 1:
+                print(f"☻♣Sleeping for {delay} seconds")
+                time.sleep(delay)
 
-            for future in as_completed(futures):
+            print(f"--- Try #{retry_count} for {len(expanded_tasks)} tasks ---")
+            failed_tasks = []
 
-                completed_tasks_counter += 1
-                completed_tasks.append(future.result())
+            def delayed_handle_request(delay, *task_args):
+                time.sleep(delay)
+                return handle_request(*task_args)
 
-                result, start_date, end_date, shared_dir, company, name = future.result()
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                future_to_task = {}
+                for idx, task in enumerate(expanded_tasks):
+                    interval = random.randint(1, 12)  # seconds
+                    print(f"→→→ task'th {idx} delayed: {interval}")
+                    delay = interval * idx
+                    future = executor.submit(delayed_handle_request, delay, *task)
+                    future_to_task[future] = task
 
-                # try:
-                #     downloaded_df = pd.read_excel(BytesIO(result.content))
-                # except ValueError as e:
-                #     logging.error("Error reading Excel file: %s", e)
-                #     return Response({'issue': f'Error reading Excel file: {e}', 'status': 400})
-                
-                if result is not None and result.ok:
-                    print(f"☻☻Success fetching {company}'s {name} report in {start_date} to {end_date}.☺☺")
+                completed_tasks_counter = 0
+                completed_tasks = []
 
-                    content_disp = result.headers.get('Content-Disposition')
-                    # print(">> Content-Disposition header:", repr(content_disp))
-                    # print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
-                    # print(content_disp)
-
-                    # بافل regex
-                    # raw_name  = extract_filename(content_disp)
-                    # if raw_name is None and content_disp:
-                    #     raw_name = fallback_extract(content_disp)
+                for future in as_completed(future_to_task):
                     
-                    # Convert Date times from gregorian to Jalali which first converting object from string
-                    # print("→→→Last margin←←←")
-                    # print(f'start_date: {start_date}, end_date: {end_date}')
-                    start_date = datetime.datetime.strptime(start_date, '%Y/%m/%d %H:%M:%S')
-                    start_date = jdatetime.datetime.fromgregorian(date=start_date).strftime('%Y_%m_%d_%H_%M_%S')
+                    # Available omittion using failed_tasks list recently promotion.
+                    completed_tasks_counter += 1
+                    completed_tasks.append(future.result())
 
-                    end_date = datetime.datetime.strptime(end_date, '%Y/%m/%d %H:%M:%S')                
-                    end_date = jdatetime.datetime.fromgregorian(date=end_date).strftime('%Y_%m_%d_%H_%M_%S')
+                    task = future_to_task[future]
 
-                    file_suffix = f"{start_date}__{end_date}"
+                    try:
+                        result, start_date, end_date, shared_dir, company, name = future.result()
+                    except Exception as exc:
+                        failed_tasks.append(task)
+                        continue
 
-                    # if raw_name:
-                    #     raw_name = remove_all_extensions(raw_name)
-                    #     clean_name = sanitize_filename(raw_name)
-                    #     filename   = f"{clean_name}_{file_suffix}.xlsx"
-                    # else:
-                    #     filename   = f"response_{file_suffix}.xlsx"
+                    # try:
+                    #     downloaded_df = pd.read_excel(BytesIO(result.content))
+                    # except ValueError as e:
+                    #     logging.error("Error reading Excel file: %s", e)
+                    #     return Response({'issue': f'Error reading Excel file: {e}', 'status': 400})
 
-                    clean_name = sanitize_filename(name)
-                    filename   = f"{clean_name}_{file_suffix}.xlsx"
+                    if result is None or not result.ok:
+                        failed_tasks.append(task)
+                        logger.error(
+                            f"Error in fetching {company}'s {name} report in {start_date} to {end_date} "
+                            f"expected in {shared_dir}'s directory!"
+                        )                    
+                    else:
+                        print(f"☻☻Success fetching {company}'s {name} report in {start_date} to {end_date}.☺☺")
 
-                    # Save exported file 
-                    file_path = os.path.join(shared_dir, filename)
-                    with open(file_path, 'wb') as f:
-                        f.write(result.content)
-                else:
-                    logger.error(
-                        f"Error in fetching {company}'s {name} report in {start_date} to {end_date} "
-                        f"expected in {shared_dir}'s directory!"
-                    )                    
+                        content_disp = result.headers.get('Content-Disposition')
+                        # print(">> Content-Disposition header:", repr(content_disp))
+                        # print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
+                        # print(content_disp)
+
+                        # بافل regex
+                        # raw_name  = extract_filename(content_disp)
+                        # if raw_name is None and content_disp:
+                        #     raw_name = fallback_extract(content_disp)
+                        
+                        # Convert Date times from gregorian to Jalali which first converting object from string
+                        # print("→→→Last margin←←←")
+                        # print(f'start_date: {start_date}, end_date: {end_date}')
+                        start_date = datetime.datetime.strptime(start_date, '%Y/%m/%d %H:%M:%S')
+                        start_date = jdatetime.datetime.fromgregorian(date=start_date).strftime('%Y_%m_%d_%H_%M_%S')
+
+                        end_date = datetime.datetime.strptime(end_date, '%Y/%m/%d %H:%M:%S')                
+                        end_date = jdatetime.datetime.fromgregorian(date=end_date).strftime('%Y_%m_%d_%H_%M_%S')
+
+                        file_suffix = f"{start_date}__{end_date}"
+
+                        # if raw_name:
+                        #     raw_name = remove_all_extensions(raw_name)
+                        #     clean_name = sanitize_filename(raw_name)
+                        #     filename   = f"{clean_name}_{file_suffix}.xlsx"
+                        # else:
+                        #     filename   = f"response_{file_suffix}.xlsx"
+
+                        clean_name = sanitize_filename(name)
+                        filename   = f"{clean_name}_{file_suffix}.xlsx"
+
+                        # Save exported file 
+                        file_path = os.path.join(shared_dir, filename)
+                        try:
+                            with open(file_path, 'wb') as f:
+                                f.write(result.content)
+                        except Exception as file_exc:
+                            print(f"✖ Saving file issued {task}: {file_exc}")
+                            failed_tasks.append(task)
+
+            expanded_tasks = failed_tasks
 
         ext_duration = datetime.timedelta(seconds=time.time() - starting_time)
 
         response_data = {
+            "ext_duration": ext_duration,
             "completed_tasks_counter": completed_tasks_counter,
-            "ext_duration": ext_duration
+            "Count of failed tasks": len(expanded_tasks)
         }                
 
         return Response(response_data, status=201)

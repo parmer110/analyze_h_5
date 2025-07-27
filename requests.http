@@ -1,3 +1,5 @@
+# H A M K A D E H
+# _________________________________________
 # Logging on Hamkadeh
 POST http://192.168.134.10:8002/web_requests/h/login/
 Content-Type: application/json
@@ -11,7 +13,21 @@ Content-Type: application/json
 # "type": "voip"
 
 ###
+# HAMKADEH: Supplier missedcalls
+###
+POST http://192.168.134.10:8002/web_requests/h/c_sup/?username=aeshraghi
+Content-Type: application/json
 
+{
+
+}
+
+###
+
+
+
+# 5 0 4 0
+# _________________________________________
 # Logging on 5040
 POST http://192.168.134.10:8002/web_requests/5/login/
 Content-Type: application/json
@@ -22,14 +38,37 @@ Content-Type: application/json
     "type": "test"
 }
 
-# Hamkadeh request: supplier missedcalls
 ###
-POST http://192.168.134.10:8002/web_requests/h/c_sup/?username=aeshraghi
+#
+# Archive
+POST http://192.168.134.10:8002/web_requests/archive/?username=aeshraghi
 Content-Type: application/json
 
-{
-
-}
+[
+    {
+        "company": "Hamkadeh",
+        "name": "accounting/call-log/index",
+        "directory_helper": "تماس از طرف مشتری و کد 11 و کد 9",
+        "body": {
+        "call_type[]": [1,2,3],
+        "start_at": "1404/01/01 00:00:00",
+        "end_at": "1404/03/10 23:59:59"
+    },
+        "query": {
+        "call_type[]": [1,2,3],
+        "start_at": "1404/01/01 00:00:00",
+        "end_at": "1404/03/10 23:59:59"
+    }
+  }
+]
 
 
 ###
+#
+# 5040Home
+# Opening Home
+GET http://192.168.134.10:8002/web_requests/5/open_home/?username=aeshraghi
+Content-Type: application/json
+
+###
+#

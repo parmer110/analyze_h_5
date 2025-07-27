@@ -20,7 +20,7 @@ This project is designed to handle web page request simulations and generate res
 1. **Start the Django development server:**
    ```sh
    env\scripts\activate
-   psql -U parmer_110 -h 192.168.134.44 -d analyzeunit
+   psql -U parmer_110 -h 192.168.134.133 -d analyzeunit
    python manage.py runserver 0.0.0.0:8001
    python manage.py qcluster
    uvicorn m10.asgi:application --reload --host 0.0.0.0 --port 8002
