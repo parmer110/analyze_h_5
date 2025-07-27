@@ -47,7 +47,8 @@ from .models import RequestLog, Requests, WebTokens, RequestsForeign
 from common.models import User, Companies
 from scheduler.tasks import open_browser
 from .utils import (
-    handle_request, generate_daily_intervals, extract_filename, sanitize_filename, fallback_extract, remove_all_extensions
+    handle_request, generate_daily_intervals, extract_filename, sanitize_filename, fallback_extract, remove_all_extensions,
+    get_filename_and_extension_from_response
 )
 from .request_params import (
     _5_sale_entries_extraction_request_params,
@@ -1295,19 +1296,8 @@ class ArchiveViewSet(viewsets.ViewSet):
                     else:
                         print(f"☻☻Success fetching {company}'s {name} report in {start_date} to {end_date}.☺☺")
 
-                        content_disp = result.headers.get('Content-Disposition')
-                        # print(">> Content-Disposition header:", repr(content_disp))
-                        # print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
-                        # print(content_disp)
+                        filename, ext = get_filename_and_extension_from_response(result)
 
-                        # بافل regex
-                        # raw_name  = extract_filename(content_disp)
-                        # if raw_name is None and content_disp:
-                        #     raw_name = fallback_extract(content_disp)
-                        
-                        # Convert Date times from gregorian to Jalali which first converting object from string
-                        # print("→→→Last margin←←←")
-                        # print(f'start_date: {start_date}, end_date: {end_date}')
                         start_date = datetime.datetime.strptime(start_date, '%Y/%m/%d %H:%M:%S')
                         start_date = jdatetime.datetime.fromgregorian(date=start_date).strftime('%Y_%m_%d_%H_%M_%S')
 
@@ -1316,15 +1306,8 @@ class ArchiveViewSet(viewsets.ViewSet):
 
                         file_suffix = f"{start_date}__{end_date}"
 
-                        # if raw_name:
-                        #     raw_name = remove_all_extensions(raw_name)
-                        #     clean_name = sanitize_filename(raw_name)
-                        #     filename   = f"{clean_name}_{file_suffix}.xlsx"
-                        # else:
-                        #     filename   = f"response_{file_suffix}.xlsx"
-
                         clean_name = sanitize_filename(name)
-                        filename   = f"{clean_name}_{file_suffix}.xlsx"
+                        filename   = f"{clean_name}_{file_suffix}.{ext}"
 
                         # Save exported file 
                         file_path = os.path.join(shared_dir, filename)
@@ -1341,6 +1324,7 @@ class ArchiveViewSet(viewsets.ViewSet):
 
         response_data = {
             "ext_duration": ext_duration,
+            "average_duration": ext_duration/completed_tasks_counter,
             "completed_tasks_counter": completed_tasks_counter,
             "Count of failed tasks": len(expanded_tasks)
         }                

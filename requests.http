@@ -47,19 +47,17 @@ Content-Type: application/json
 [
     {
         "company": "Hamkadeh",
-        "name": "accounting/call-log/index",
-        "directory_helper": "تماس از طرف مشتری و کد 11 و کد 9",
-        "body": {
-        "call_type[]": [1,2,3],
-        "start_at": "1404/01/01 00:00:00",
-        "end_at": "1404/03/10 23:59:59"
-    },
+        "name": "factor/index",
+        "directory_helper": "وصول",
+        "body": {},
         "query": {
-        "call_type[]": [1,2,3],
-        "start_at": "1404/01/01 00:00:00",
-        "end_at": "1404/03/10 23:59:59"
+        "export_data": 1,
+        "start_accept_action_date": "1404/05/04 00:00:00",
+        "end_accept_action_date": "1404/05/04 23:59:59",
+        "receipt_status": "accepted ",
+        "status": "PAID"
     }
-  }
+  }    
 ]
 
 

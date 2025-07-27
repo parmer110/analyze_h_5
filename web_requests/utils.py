@@ -3,6 +3,7 @@ import jdatetime
 import logging
 import re
 import os
+import urllib.parse
 from datetime import timedelta
 from typing import List, Dict
 from email.parser import HeaderParser
@@ -271,3 +272,38 @@ def remove_all_extensions(filename):
         if not ext:
             return base
         filename = base
+
+
+def get_filename_and_extension_from_response(response):
+    """
+    Extracts the filename and extension from the response headers.
+    Handles Farsi and Unicode filenames correctly.
+    
+    Returns:
+        (filename, extension) or (None, None) if not found.
+    """
+    content_disposition = response.headers.get('Content-Disposition', '')
+    
+    # Try filename*= for encoded UTF-8 filenames (RFC 5987)
+    match_utf8 = re.search(r"filename\*\s*=\s*UTF-8''(.+)", content_disposition)
+    if match_utf8:
+        filename_encoded = match_utf8.group(1)
+        filename = urllib.parse.unquote(filename_encoded)
+        extension = filename.split('.')[-1].lower() if '.' in filename else None
+        return filename, extension
+
+    # Try normal filename=
+    match_ascii = re.search(r'filename="?([^"]+)"?', content_disposition)
+    if match_ascii:
+        filename = match_ascii.group(1)
+        extension = filename.split('.')[-1].lower() if '.' in filename else None
+        return filename, extension
+
+    # Fallback: try Content-Type header
+    content_type = response.headers.get('Content-Type', '').lower()
+    if 'excel' in content_type:
+        return None, 'xlsx'
+    elif 'csv' in content_type:
+        return None, 'csv'
+
+    return None, None
