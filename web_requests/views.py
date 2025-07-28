@@ -47,8 +47,8 @@ from .models import RequestLog, Requests, WebTokens, RequestsForeign
 from common.models import User, Companies
 from scheduler.tasks import open_browser
 from .utils import (
-    handle_request, generate_daily_intervals, extract_filename, sanitize_filename, fallback_extract, remove_all_extensions,
-    get_filename_and_extension_from_response
+    handle_request, generate_intervals, extract_filename, sanitize_filename, fallback_extract, remove_all_extensions,
+    get_filename_and_extension_from_response, merge_completed_tasks
 )
 from .request_params import (
     _5_sale_entries_extraction_request_params,
@@ -1180,6 +1180,7 @@ class ArchiveViewSet(viewsets.ViewSet):
             dir_hlp_name = req.get("directory_helper")
             body_parameters = req.get("body", None)
             query_parameters = req.get("query", None)
+            idn = req.get("integration_days_num", None)
 
             shared_dir = os.path.join(base_shared_dir, sanitize_filename(company))
             shared_dir = os.path.join(shared_dir, sanitize_filename(name))
@@ -1201,9 +1202,6 @@ class ArchiveViewSet(viewsets.ViewSet):
             # Dynamic serializer
             serializer = DynamicRequestSerializer(data={**body_parameters, **query_parameters}, request_foreign=request_instance)
 
-            # print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
-            # print(f"serializer: {serializer}, query_parameters: {query_parameters}")
-
             if not serializer.is_valid():
                 return Response({f'Company "{company}", Request "{name}" serializer error!':serializer.errors, 'status':412})
 
@@ -1224,7 +1222,7 @@ class ArchiveViewSet(viewsets.ViewSet):
             end_date = parameters[end_date_name].strftime('%Y/%m/%d %H:%M:%S')
             
             # separate date rage each day individual considering first starting and lans ending hours
-            dates = generate_daily_intervals(start_date, end_date)
+            dates = generate_intervals(start_date, end_date, idn)
 
             method, url, headers, params = task
             for interval in dates:
@@ -1234,9 +1232,11 @@ class ArchiveViewSet(viewsets.ViewSet):
                 new_params[end_date_name] = interval['end_date']
 
                 expanded_tasks.append((
-                    method, url, headers, new_params, interval['start_date'], interval['end_date'], shared_dir, company, name
+                    method, url, headers, new_params, interval['start_date'], interval['end_date'], shared_dir, company, name, idn
                 ))
         
+        #############################
+        # Preparing requested data download
         max_retries = 5
         retry_count = 0
 
@@ -1259,7 +1259,7 @@ class ArchiveViewSet(viewsets.ViewSet):
                 future_to_task = {}
                 for idx, task in enumerate(expanded_tasks):
                     interval = random.randint(1, 12)  # seconds
-                    print(f"→→→ task'th {idx} delayed: {interval}")
+                    print(f"→→→ task'th {idx + 1} delayed: {interval}")
                     delay = interval * idx
                     future = executor.submit(delayed_handle_request, delay, *task)
                     future_to_task[future] = task
@@ -1269,23 +1269,13 @@ class ArchiveViewSet(viewsets.ViewSet):
 
                 for future in as_completed(future_to_task):
                     
-                    # Available omittion using failed_tasks list recently promotion.
-                    completed_tasks_counter += 1
-                    completed_tasks.append(future.result())
-
                     task = future_to_task[future]
 
                     try:
-                        result, start_date, end_date, shared_dir, company, name = future.result()
+                        result, start_date, end_date, shared_dir, company, name, idn = future.result()
                     except Exception as exc:
                         failed_tasks.append(task)
                         continue
-
-                    # try:
-                    #     downloaded_df = pd.read_excel(BytesIO(result.content))
-                    # except ValueError as e:
-                    #     logging.error("Error reading Excel file: %s", e)
-                    #     return Response({'issue': f'Error reading Excel file: {e}', 'status': 400})
 
                     if result is None or not result.ok:
                         failed_tasks.append(task)
@@ -1296,38 +1286,58 @@ class ArchiveViewSet(viewsets.ViewSet):
                     else:
                         print(f"☻☻Success fetching {company}'s {name} report in {start_date} to {end_date}.☺☺")
 
-                        filename, ext = get_filename_and_extension_from_response(result)
-
-                        start_date = datetime.datetime.strptime(start_date, '%Y/%m/%d %H:%M:%S')
-                        start_date = jdatetime.datetime.fromgregorian(date=start_date).strftime('%Y_%m_%d_%H_%M_%S')
-
-                        end_date = datetime.datetime.strptime(end_date, '%Y/%m/%d %H:%M:%S')                
-                        end_date = jdatetime.datetime.fromgregorian(date=end_date).strftime('%Y_%m_%d_%H_%M_%S')
-
-                        file_suffix = f"{start_date}__{end_date}"
-
-                        clean_name = sanitize_filename(name)
-                        filename   = f"{clean_name}_{file_suffix}.{ext}"
-
-                        # Save exported file 
-                        file_path = os.path.join(shared_dir, filename)
-                        try:
-                            with open(file_path, 'wb') as f:
-                                f.write(result.content)
-                        except Exception as file_exc:
-                            print(f"✖ Saving file issued {task}: {file_exc}")
-                            failed_tasks.append(task)
+                        completed_tasks_counter += 1
+                        completed_tasks.append(future)
 
             expanded_tasks = failed_tasks
+        
+        #############################
+        # Preparing donwloaded data analyze end exportation
+        completed_tasks = merge_completed_tasks(completed_tasks)
+        
+        for task in completed_tasks:
 
+            # integration_days_num = req.get("integration_days_num", None)
+            result, start_date, end_date, shared_dir, company, name, idn = task.result()
+
+            filename, ext = get_filename_and_extension_from_response(result)
+
+            start_date = datetime.datetime.strptime(start_date, '%Y/%m/%d %H:%M:%S')
+            start_date = jdatetime.datetime.fromgregorian(date=start_date).strftime('%Y_%m_%d_%H_%M_%S')
+
+            end_date = datetime.datetime.strptime(end_date, '%Y/%m/%d %H:%M:%S')                
+            end_date = jdatetime.datetime.fromgregorian(date=end_date).strftime('%Y_%m_%d_%H_%M_%S')
+
+            file_suffix = f"{start_date}__{end_date}"
+
+            clean_name = sanitize_filename(name)
+            filename   = f"{clean_name}_{file_suffix}.{ext}"
+
+            # Save exported file 
+            file_path = os.path.join(shared_dir, filename)
+            try:
+                with open(file_path, 'wb') as f:
+                    f.write(result.content)
+            except Exception as file_exc:
+                print(f"✖ Saving file issued {task}: {file_exc}")
+                failed_tasks.append(task)
+
+
+        #############################
+        # Finilize response preperation
         ext_duration = datetime.timedelta(seconds=time.time() - starting_time)
 
         response_data = {
             "ext_duration": ext_duration,
-            "average_duration": ext_duration/completed_tasks_counter,
+            "average_duration": ext_duration/completed_tasks_counter if completed_tasks_counter !=0 else 0,
             "completed_tasks_counter": completed_tasks_counter,
             "Count of failed tasks": len(expanded_tasks)
         }                
 
         return Response(response_data, status=201)
     
+    # try:
+    #     downloaded_df = pd.read_excel(BytesIO(result.content))
+    # except ValueError as e:
+    #     logging.error("Error reading Excel file: %s", e)
+    #     return Response({'issue': f'Error reading Excel file: {e}', 'status': 400})

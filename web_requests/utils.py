@@ -1,16 +1,24 @@
 import requests
 import jdatetime
+import datetime
 import logging
 import re
 import os
 import urllib.parse
+from collections import defaultdict
+from dateutil.relativedelta import relativedelta
+import pandas as pd
+from io import BytesIO
 from datetime import timedelta
 from typing import List, Dict
 from email.parser import HeaderParser
+from itertools import islice
 from urllib.parse import unquote
 from common.locks import redlock_instance
 
 logger = logging.getLogger(__name__)
+EXCEL_MAX_ROWS = 1_048_576
+MAX_EXCEL_COLS = 16_384
 
 
 def fetch_data():
@@ -79,7 +87,7 @@ def _perform_refresh(username: str):
     resp.raise_for_status()
     logger.info(f"[Refresh] Completed with status {resp.status_code}")
 
-def handle_request(method, url, headers, data, start_date, end_date, shared_dir, company, name):
+def handle_request(method, url, headers, data, start_date, end_date, shared_dir, company, name, idn):
     response = None
     counter = 0
     if method == 'GET':
@@ -124,7 +132,7 @@ def handle_request(method, url, headers, data, start_date, end_date, shared_dir,
                         )
 
     elif method == 'POST':
-        while (not response or not response.ok) and counter <= 3:
+        while (not response or not response.ok) and counter <= 0:
             counter += 1
 
             logger.info(f"Attempting POST request to {url} with headers {headers} and params {data}.")
@@ -160,7 +168,7 @@ def handle_request(method, url, headers, data, start_date, end_date, shared_dir,
     counter = 0
 
     # print(f"request to {response.url} Header is {headers} with status code {response.status_code}.")
-    return response, start_date, end_date, shared_dir, company, name
+    return response, start_date, end_date, shared_dir, company, name, idn
 
 
 def parse_jalali_datetime(
@@ -176,50 +184,63 @@ def parse_jalali_datetime(
         return parsed.replace(second=0)
 
 
-def generate_daily_intervals(
+def generate_intervals(
     start_str: str,
-    end_str: str
+    end_str: str,
+    idn: Dict[str, int]
 ) -> List[Dict[str, str]]:
     """
-    Generate daily intervals as Gregorian date strings.
-    
-    - start_str, end_str: Jalali strings like '1404/02/10 12:30' or '1404/02/10 12:30:45'
+    Generate time-based intervals according to integration_days_num (idn).
+
+    - start_str, end_str: Jalali strings like '1404/02/10 12:30:45'
+    - idn: {'year':0, 'month':0, 'day':0, 'hour':h, 'minute':m, 'second':s}
     - Returns: [{'start_date': 'YYYY/MM/DD HH:MM:SS', 'end_date': 'YYYY/MM/DD HH:MM:SS'}, ...]
     """
-    primary_format = '%Y/%m/%d %H:%M:%S'
-    fallback_format = '%Y/%m/%d %H:%M'
+    primary_fmt = '%Y/%m/%d %H:%M:%S'
+    fallback_fmt = '%Y/%m/%d %H:%M'
 
-    jstart = parse_jalali_datetime(start_str, primary_format, fallback_format)
-    jend   = parse_jalali_datetime(end_str,   primary_format, fallback_format)
-
+    # convert Jalali to Gregorian datetime
+    jstart = parse_jalali_datetime(start_str, primary_fmt, fallback_fmt)
+    jend   = parse_jalali_datetime(end_str,   primary_fmt, fallback_fmt)
     start = jstart.togregorian()
     end   = jend.togregorian()
 
     if start > end:
         raise ValueError("Start date must be before end date")
 
+    # Devide littelest interval
+    if idn.get("second", 0) > 0:
+        step = timedelta(seconds=idn["second"])
+    elif idn.get("minute", 0) > 0:
+        step = timedelta(minutes=idn["minute"])
+    elif idn.get("hour", 0) > 0:
+        step = timedelta(hours=idn["hour"])
+    else:
+        # Dayly defalut
+        step = timedelta(days=1)
+
     intervals: List[Dict[str, str]] = []
-    current = start
+    current_start = start
 
-    while current <= end:
-        day_start = current if current == start else current.replace(
-            hour=0, minute=0, second=0
-        )
-
-        if current.date() == end.date():
-            day_end = end
-        else:
-            day_end = current.replace(hour=23, minute=59, second=59)
+    while current_start <= end:
+        current_end = current_start + step
+        # deviding end time override.
+        if current_end > end:
+            current_end = end
 
         intervals.append({
-            'start_date': day_start.strftime(primary_format),
-            'end_date':   day_end.strftime(primary_format),
+            'start_date': current_start.strftime(primary_fmt),
+            'end_date':   current_end.strftime(primary_fmt),
         })
 
-        current = day_end + timedelta(seconds=1)
+        # Devide indifinite loop
+        if current_end == current_start:
+            break
+
+        # next step
+        current_start = current_end + timedelta(seconds=1)
 
     return intervals
-
 
 def extract_filename(content_disposition: str) -> str | None:
     if not content_disposition:
@@ -307,3 +328,122 @@ def get_filename_and_extension_from_response(response):
         return None, 'csv'
 
     return None, None
+
+
+class DummyResponse:
+    """A minimal stand‑in for a requests.Response-like object with headers."""
+    def __init__(self, content: bytes, ext: str):
+        self.content = content
+        self.ok = True
+        # Provide a Content-Disposition header so get_filename... can extract ext
+        self.headers = {'Content-Disposition': f'attachment; filename=merged_file.{ext}'}
+
+class MergedTask:
+    """
+    Mimics a Future whose .result() returns:
+      (response_obj, start_str, end_str, shared_dir, company, name, idn)
+    """
+    def __init__(self, content_bytes, start_str, end_str, shared_dir, company, name, idn, ext):
+        self._response = DummyResponse(content_bytes, ext)
+        # ext is embedded in headers; do not include in meta unpack
+        self._meta = (start_str, end_str, shared_dir, company, name, idn)
+
+    def result(self):
+        return (self._response, *self._meta)
+
+
+def merge_completed_tasks(completed_tasks):
+    """
+    Input:
+      completed_tasks: list of futures/tasks whose .result() returns
+        (response_obj, s_jstr, e_jstr, shared_dir, company, name, idn)
+        where s_jstr/e_jstr are Jalali strings '%Y/%m/%d %H:%M:%S'.
+    Output:
+      new list of MergedTask: for each shared_dir, if idn > 1 day then
+      merge tasks in XLSX or CSV batches (never exceeding Excel row limit),
+      otherwise pass tasks through unchanged.
+    """
+    raw = []
+    for fut in completed_tasks:
+        resp, s_jstr, e_jstr, shared_dir, company, name, idn = fut.result()
+        s_dt = jdatetime.datetime.strptime(s_jstr, '%Y/%m/%d %H:%M:%S').togregorian()
+        e_dt = jdatetime.datetime.strptime(e_jstr, '%Y/%m/%d %H:%M:%S').togregorian()
+        cd = getattr(resp, 'headers', {}).get('Content-Disposition', '')
+        ext = 'csv' if '.csv' in cd.lower() else 'xlsx'
+        raw.append({'resp': resp, 's_dt': s_dt, 'e_dt': e_dt,
+                    's_jstr': s_jstr, 'e_jstr': e_jstr,
+                    'shared_dir': shared_dir, 'company': company,
+                    'name': name, 'idn': idn, 'ext': ext})
+
+    groups = defaultdict(list)
+    for item in raw:
+        groups[item['shared_dir']].append(item)
+
+    merged_tasks = []
+    for shared_dir, items in groups.items():
+        idn = items[0]['idn']
+        secs = (idn.get('year',0)*365*86400 + idn.get('month',0)*30*86400 +
+                idn.get('day',0)*86400 + idn.get('hour',0)*3600 +
+                idn.get('minute',0)*60 + idn.get('second',0))
+
+        items.sort(key=lambda x: x['s_dt'])
+
+        if secs <= 86400:
+            for it in items:
+                merged_tasks.append(MergedTask(it['resp'].content,
+                                               it['s_jstr'], it['e_jstr'],
+                                               it['shared_dir'], it['company'],
+                                               it['name'], it['idn'], it['ext']))
+            continue
+
+        current_df = None
+        cur_start_dt = None
+        cur_end_dt = None
+        cur_meta = None
+        group_ext = items[0]['ext']
+
+        def flush_batch():
+            nonlocal current_df, cur_start_dt, cur_end_dt, cur_meta, group_ext
+            if current_df is None:
+                return
+            with BytesIO() as buf:
+                if group_ext == 'csv':
+                    current_df.to_csv(buf, index=False, encoding='utf-8-sig')
+                else:
+                    current_df.to_excel(buf, index=False, engine='openpyxl')
+                data = buf.getvalue()
+            s_j = jdatetime.datetime.fromgregorian(datetime=cur_start_dt).strftime('%Y/%m/%d %H:%M:%S')
+            e_j = jdatetime.datetime.fromgregorian(datetime=cur_end_dt).strftime('%Y/%m/%d %H:%M:%S')
+            merged_tasks.append(MergedTask(data, s_j, e_j,
+                                           cur_meta['shared_dir'], cur_meta['company'],
+                                           cur_meta['name'], cur_meta['idn'], group_ext))
+            current_df = None
+
+        for it in items:
+            bio = BytesIO(it['resp'].content)
+            df = pd.read_csv(bio) if it['ext'] == 'csv' else pd.read_excel(bio)
+            if len(df) > EXCEL_MAX_ROWS:
+                logger.error(f"Skipped task {it['s_jstr']}→{it['e_jstr']} (rows {len(df)}) > Excel limit")
+                continue
+            if current_df is None:
+                current_df = df
+                cur_start_dt = it['s_dt']
+                cur_end_dt = it['e_dt']
+                cur_meta = it
+            elif it['s_dt'] > (cur_start_dt + datetime.timedelta(seconds=secs)):
+                flush_batch()
+                current_df = df
+                cur_start_dt = it['s_dt']
+                cur_end_dt = it['e_dt']
+                cur_meta = it
+            elif len(current_df) + len(df) > EXCEL_MAX_ROWS:
+                flush_batch()
+                current_df = df
+                cur_start_dt = it['s_dt']
+                cur_end_dt = it['e_dt']
+                cur_meta = it
+            else:
+                current_df = pd.concat([current_df, df], ignore_index=True)
+                cur_end_dt = it['e_dt']
+        flush_batch()
+    return merged_tasks
