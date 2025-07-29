@@ -45,26 +45,26 @@ POST http://192.168.134.10:8002/web_requests/archive/?username=aeshraghi
 Content-Type: application/json
 
 [
-  {
-    "company": "5040",
-    "name": "call/logs/list",
-    "directory_helper": "",
-    "integration_days_num": {
-        "year": 0,
-        "month": 1,
-        "day": 2,
-        "hour": 0,
-        "minute": 0,
-        "second": 0
-    },    
-    "body": {},
-    "query": {
+    {
+        "company": "5040",
+        "name": "factors/list",
+        "directory_helper": "ثبت",
+        "integration_days_num": {
+            "year": 0,
+            "month": 0,
+            "day": 1,
+            "hour": 0,
+            "minute": 0,
+            "second": 0
+        },
+        "body": {},
+        "query": {
         "report": 1,
         "filter": 1,
-        "startCallDate": "1404/01/01 00:00:00",
-        "endCallDate": "1404/02/26 00:00:00"
+        "startInvoiceDate": "1404/05/06 00:00:00",
+        "endInvoiceDate": "1404/05/06 23:59:59"
     }
-  }
+  }    
 ]
 
 

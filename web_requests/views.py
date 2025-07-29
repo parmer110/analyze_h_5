@@ -945,163 +945,10 @@ class noname(viewsets.ViewSet):
                 status=status.HTTP_401_UNAUTHORIZED
             )
 
-        entries_serializer = EntriesExtraction_5(data=request.data)
-        call_logs_serializer = CallLogsList(data=request.data)
-        factor_serializer = FactorsList(data=request.data)
-
-        if not entries_serializer.is_valid():
-            return Response({'Sale Entries Extraction serializer error':entries_serializer.errors, 'status':412})
-
-        if not call_logs_serializer.is_valid():
-            return Response({'Call Logs List serializer error':call_logs_serializer.errors, 'status':414})
-
-        if not factor_serializer.is_valid():
-            return Response({'Factors List serializer error':factor_serializer.errors, 'status':416})
-            
-        # return Response(serializer.validated_data, status=201)
-        # return Response(username, status=201)
-        
-        ########################################################
-        #region Initialization
-        # Request executation duration time
-
-        starting_time = time.time()
-        # Directories path
-        shared_dir = r'C:\Users\eshraghi\Documents\esh\share\noname\temp'
-        calc_file_path = r'C:\Users\eshraghi\Documents\esh\share\noname\source\ads_vs_sale-main14040126.xlsx'
-
-        # Jalali Date Time
-        now_jalali = jdatetime.datetime.now()
-        formatted_jalali_date = now_jalali.strftime('%Y_%m_%d_%H_%M_%S')
-        year_jalali = now_jalali.year
-        month_jalali = now_jalali.month
-        day_jalali = now_jalali.day
-        
-        # Gregorian Date Time
-        gregorian_now = datetime.datetime.now()
-        date_gregorian = gregorian_now.date()
-        hour = gregorian_now.hour
-        nearest_before_hour = f"{hour:02}:00:00"
-
-        # COM Excel object preparation
-        app = xw.App(visible=False)
-        app.screen_updating = False
-        app.calculation = 'manual'
-        app.enable_events = False
-        app.display_alerts = False
-
-        # Initilization request prerequests
-        try:
-            token_5 = WebTokens.objects.get(user=user, name='token_5').value
-            loginExpire_5 = WebTokens.objects.get(user=user, name='loginExpire_5').value
-        except WebTokens.DoesNotExist:
-            return Response(
-                {'message': 'Tokens missing'},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-        
-        extractions = ['5_Entries', '5_voip', '5_factors_reg', '5_factors_paid' ]
-
-        headers_5 = {
-            'Authorization': f'Bearer {token_5}',
-            'loginExpire': loginExpire_5
-        }
-
-        startEntryDate = (date_gregorian - timedelta(days=5)).strftime('%Y-%m-%d') # Default is 5 days before now
-        endEntryDate = f"{date_gregorian} {nearest_before_hour}".strftime('%Y-%m-%d %H:%M:%S')
-        payload_5_entries = {
-            "agencies": EntriesExtraction_5.validated_data.get("agencies", []),
-            "callStatuses": EntriesExtraction_5.validated_data.get("callStatuses", []),
-            "containDeletedEntries": EntriesExtraction_5.validated_data.get("containDeletedEntries", True),
-            "endEntryDate": EntriesExtraction_5.validated_data.get("endEntryDate", f"{endEntryDate}"),
-            "factorSerial": EntriesExtraction_5.validated_data.get("factorSerial", ""),
-            "factorStatuses": EntriesExtraction_5.validated_data.get("factorStatuses", []),
-            "isTrusted": EntriesExtraction_5.validated_data.get("isTrusted", True),
-            "justDeletedEntries": EntriesExtraction_5.validated_data.get("justDeletedEntries", False),
-            "maxCallNumber": EntriesExtraction_5.validated_data.get("maxCallNumber", ""),
-            "maxSuccessCallNumber": EntriesExtraction_5.validated_data.get("maxSuccessCallNumber", ""),
-            "minCallNumber": EntriesExtraction_5.validated_data.get("minCallNumber", ""),
-            "minSuccessCallNumber": EntriesExtraction_5.validated_data.get("minSuccessCallNumber", ""),
-            "mobile": EntriesExtraction_5.validated_data.get("mobile", ""),
-            "numberStatuses": EntriesExtraction_5.validated_data.get("numberStatuses", []),
-            "products": EntriesExtraction_5.validated_data.get("products", []),
-            "references": EntriesExtraction_5.validated_data.get("references", ["Landing", "Sms"]),
-            "startEntryDate": EntriesExtraction_5.validated_data.get("startEntryDate", f"{startEntryDate} 00:00:00"),
-            "withoutFactorEntries": EntriesExtraction_5.validated_data.get("withoutFactorEntries", False)
-        }
-
-        startCallDate = (date_gregorian).strftime('%Y-%m-%d')
-        endCallDate = f"{date_gregorian} {nearest_before_hour}".strftime('%Y-%m-%d %H:%M:%S')
-        params_5_call_logs = {
-            'report': call_logs_serializer.validated_data.get('export_data', "1"),
-            'filter': call_logs_serializer.validated_data.get(),
-            'startCallDate': call_logs_serializer.validated_data.get('startCallDate', f"{startCallDate} 00:00:00" ),
-            'endCallDate': call_logs_serializer.validated_data.get('endCallDate', f"{endCallDate}")
-        }
-
-        startFactorDate = (date_gregorian).strftime('%Y-%m-%d')
-        endFactorDate = f"{date_gregorian} {nearest_before_hour}".strftime('%Y-%m-%d %H:%M:%S')
-        params_5_factor = {
-            'report': factor_serializer.validated_data.get('export_data', "1"),
-            'filter': factor_serializer.validated_data.get(),
-            'startCallDate': factor_serializer.validated_data.get('startCallDate', f"{startFactorDate} 00:00:00" ),
-            'endCallDate': factor_serializer.validated_data.get('endCallDate', f"{endFactorDate}")
-        }
-
-        startFactorPaidDate = (date_gregorian).strftime('%Y-%m-%d')
-        endFactorPaidDate = f"{date_gregorian} {nearest_before_hour}".strftime('%Y-%m-%d %H:%M:%S')
-        params_5_factor_paid = {
-            'report': factor_serializer.validated_data.get('export_data', "1"),
-            'filter': factor_serializer.validated_data.get(),
-            'startCallDate': factor_serializer.validated_data.get('startCallDate', f"{startFactorPaidDate} 00:00:00" ),
-            'endCallDate': factor_serializer.validated_data.get('endCallDate', f"{endFactorPaidDate}")
-        }
 
 
 
-        request_data = [
-            ('POST', 'https://api.5040.me/api/sale/entries/extraction', headers_5, payload_5_entries),
-            ('GET', 'https://api.5040.me/api/call/logs/list', headers_5, params_5_call_logs),
-            ('GET', 'https://api.5040.me/api/factors/list', headers_5, params_5_factor),
-            ('GET', 'https://api.5040.me/api/factors/list', headers_5, params_5_factor_paid),
-            ('POST', 'https://api.hamkadeh.com/api/entry/extract-numbers', headers, payload_h_entries),
-            ('GET', 'https://api.hamkadeh.com/api/call-log/index', headers, params_h_voip),
-            ('GET', 'https://api.hamkadeh.com/api/factor/index', headers, params_h_factor_reg),
-            ('GET', 'https://api.hamkadeh.com/api/factor/index', headers, params_h_factor_paid),
-        ]            
-        
 
-        # response = requests.post('https://api.5040.me/api/sale/entries/extraction', headers=headers, json=payload)
-
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            futures = [executor.submit(handle_request, method, url, headers, params) for method, url, headers, params in request_data]
-            results = [future.result() for future in concurrent.futures.as_completed(futures)]
-
-        try:
-            downloaded_df = pd.read_excel(BytesIO(response.content))
-        except ValueError as e:
-            logging.error("Error reading Excel file: %s", e)
-            return Response({'issue':'Please log in before making a request.', 'status':400})
-
-        content_disposition = response.headers.get('Content-Disposition')
-
-        if not os.path.exists(shared_dir):
-            os.makedirs(shared_dir)
-
-        if content_disposition:
-            filename = re.findall('filename=(.+)', content_disposition)
-            if filename:
-                filename = filename[0]
-                filename = f"{filename}_{formatted_jalali_date}.xlsx"
-            else:
-                filename = f"response_{formatted_jalali_date}.xlsx"
-        else:
-            filename = f"response_{formatted_jalali_date}.xlsx"
-
-        # Save exported file 
-        file_path = os.path.join(shared_dir, filename)
-        with open(file_path, 'wb') as f:
-            f.write(response.content)
 
 
 class ArchiveViewSet(viewsets.ViewSet):
@@ -1294,7 +1141,7 @@ class ArchiveViewSet(viewsets.ViewSet):
         #############################
         # Preparing donwloaded data analyze end exportation
         completed_tasks = merge_completed_tasks(completed_tasks)
-        
+
         for task in completed_tasks:
 
             # integration_days_num = req.get("integration_days_num", None)
