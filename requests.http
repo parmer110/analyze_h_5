@@ -56,15 +56,15 @@ Content-Type: application/json
             "hour": 0,
             "minute": 0,
             "second": 0
-        },
+        },        
         "body": {},
         "query": {
         "report": 1,
         "filter": 1,
-        "startInvoiceDate": "1404/05/06 00:00:00",
-        "endInvoiceDate": "1404/05/06 23:59:59"
+        "startInvoiceDate": "1404/05/04 00:00:00",
+        "endInvoiceDate": "1404/05/04 23:59:59"
     }
-  }    
+  }  
 ]
 
 

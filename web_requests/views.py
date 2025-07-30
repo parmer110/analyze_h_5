@@ -48,7 +48,7 @@ from common.models import User, Companies
 from scheduler.tasks import open_browser
 from .utils import (
     handle_request, generate_intervals, extract_filename, sanitize_filename, fallback_extract, remove_all_extensions,
-    get_filename_and_extension_from_response, merge_completed_tasks
+    get_filename_and_extension_from_response, merge_completed_tasks, extraction
 )
 from .request_params import (
     _5_sale_entries_extraction_request_params,
@@ -946,11 +946,6 @@ class noname(viewsets.ViewSet):
             )
 
 
-
-
-
-
-
 class ArchiveViewSet(viewsets.ViewSet):
     def create(self, request):
 
@@ -1000,152 +995,23 @@ class ArchiveViewSet(viewsets.ViewSet):
             'Authorization': f'Bearer {token_h}'
         }
 
-        # Functions requesting web_app
-        # Will made automization
-        request_handler_map = {
-            ('5040', 'sale/entries/extraction'): _5_sale_entries_extraction_request_params,
-            ('hamkadeh', 'entry/extract-numbers'): _h_extract_numbers_request_params,
 
-            ('5040', 'call/logs/list'): _5_call_logs_list_request_params,
-            ('hamkadeh', 'call-log/index'): _h_call_log_index_request_params,
-
-            ('5040', 'factors/list'): _5_factors_list_request_params,
-            ('hamkadeh', 'factor/index'): _h_factor_index_request_params,
-
-            ('hamkadeh', 'accounting/call-log/index'): _h_accounting_call_log_index,
-
-            ('hamkadeh', 'reservation/index'): _h_reservation_index,
-        }
-
-        # Dynamic Serializer: Iteration loop over each company-name request perform data valication and initalize.
-        expanded_tasks = []
-        
-        for req in request.data:
-
-            company = req.get("company").lower()
-            name = req.get("name").lower()
-            dir_hlp_name = req.get("directory_helper")
-            body_parameters = req.get("body", None)
-            query_parameters = req.get("query", None)
-            idn = req.get("integration_days_num", None)
-
-            shared_dir = os.path.join(base_shared_dir, sanitize_filename(company))
-            shared_dir = os.path.join(shared_dir, sanitize_filename(name))
-            if dir_hlp_name:
-                shared_dir = os.path.join(shared_dir, sanitize_filename(dir_hlp_name))
-            
-            os.makedirs(shared_dir, exist_ok=True)
-
-            try:
-                company_inst = Companies.objects.get(name=company)
-            except RequestsForeign.DoesNotExist:
-                return Response(f'The Company: {company} does not exist!' , status=405)
-
-            try:
-                request_instance = RequestsForeign.objects.get(company=company_inst, name=name)
-            except RequestsForeign.DoesNotExist:
-                return Response(f'The {name} does not exist for {company} company defined requests!' , status=405)
-            
-            # Dynamic serializer
-            serializer = DynamicRequestSerializer(data={**body_parameters, **query_parameters}, request_foreign=request_instance)
-
-            if not serializer.is_valid():
-                return Response({f'Company "{company}", Request "{name}" serializer error!':serializer.errors, 'status':412})
-
-            company_name_pair = (company, name)
-            if company_name_pair in request_handler_map:
-                parameters, start_date_name, end_date_name  = request_handler_map[company_name_pair](serializer, gregorian_now)
-            else:
-                return Response(f"No requesting function defined for company: {company}, name: {name}", status=400)
-
-            if company == "hamkadeh":
-                headers = headers_h
-            elif company == "5040":
-                headers = headers_5
-
-            task = (request_instance.method, request_instance.endpoint, headers, parameters)
-
-            start_date = parameters[start_date_name].strftime('%Y/%m/%d %H:%M:%S')
-            end_date = parameters[end_date_name].strftime('%Y/%m/%d %H:%M:%S')
-            
-            # separate date rage each day individual considering first starting and lans ending hours
-            dates = generate_intervals(start_date, end_date, idn)
-
-            method, url, headers, params = task
-            for interval in dates:
-                new_params = copy.deepcopy(params)
-
-                new_params[start_date_name] = interval['start_date']
-                new_params[end_date_name] = interval['end_date']
-
-                expanded_tasks.append((
-                    method, url, headers, new_params, interval['start_date'], interval['end_date'], shared_dir, company, name, idn
-                ))
-        
         #############################
-        # Preparing requested data download
-        max_retries = 5
-        retry_count = 0
+        # Preparing download and gadering tasks
+        completed_tasks, failed_tasks = extraction(request, headers_h, headers_5, gregorian_now)
 
-        while expanded_tasks and retry_count < max_retries:
-            delay = random.randint(1 * 60, 10 * 60)  # seconds
-            retry_count += 1
 
-            if retry_count > 1:
-                print(f"☻♣Sleeping for {delay} seconds")
-                time.sleep(delay)
-
-            print(f"--- Try #{retry_count} for {len(expanded_tasks)} tasks ---")
-            failed_tasks = []
-
-            def delayed_handle_request(delay, *task_args):
-                time.sleep(delay)
-                return handle_request(*task_args)
-
-            with ThreadPoolExecutor(max_workers=10) as executor:
-                future_to_task = {}
-                for idx, task in enumerate(expanded_tasks):
-                    interval = random.randint(1, 12)  # seconds
-                    print(f"→→→ task'th {idx + 1} delayed: {interval}")
-                    delay = interval * idx
-                    future = executor.submit(delayed_handle_request, delay, *task)
-                    future_to_task[future] = task
-
-                completed_tasks_counter = 0
-                completed_tasks = []
-
-                for future in as_completed(future_to_task):
-                    
-                    task = future_to_task[future]
-
-                    try:
-                        result, start_date, end_date, shared_dir, company, name, idn = future.result()
-                    except Exception as exc:
-                        failed_tasks.append(task)
-                        continue
-
-                    if result is None or not result.ok:
-                        failed_tasks.append(task)
-                        logger.error(
-                            f"Error in fetching {company}'s {name} report in {start_date} to {end_date} "
-                            f"expected in {shared_dir}'s directory!"
-                        )                    
-                    else:
-                        print(f"☻☻Success fetching {company}'s {name} report in {start_date} to {end_date}.☺☺")
-
-                        completed_tasks_counter += 1
-                        completed_tasks.append(future)
-
-            expanded_tasks = failed_tasks
-        
         #############################
-        # Preparing donwloaded data analyze end exportation
+        # Preparing donwloaded data analyze end Integration
         completed_tasks = merge_completed_tasks(completed_tasks)
+
 
         for task in completed_tasks:
 
-            # integration_days_num = req.get("integration_days_num", None)
-            result, start_date, end_date, shared_dir, company, name, idn = task.result()
+            result, start_date, end_date, specific_dir, company, name, idn = task.result()
+
+            shared_dir = os.path.join(base_shared_dir, specific_dir)
+            os.makedirs(shared_dir, exist_ok=True)
 
             filename, ext = get_filename_and_extension_from_response(result)
 
@@ -1173,18 +1039,14 @@ class ArchiveViewSet(viewsets.ViewSet):
         #############################
         # Finilize response preperation
         ext_duration = datetime.timedelta(seconds=time.time() - starting_time)
+        completed_tasks_counter = len(completed_tasks)
 
         response_data = {
             "ext_duration": ext_duration,
             "average_duration": ext_duration/completed_tasks_counter if completed_tasks_counter !=0 else 0,
             "completed_tasks_counter": completed_tasks_counter,
-            "Count of failed tasks": len(expanded_tasks)
+            "Count of failed tasks": len(failed_tasks)
         }                
 
         return Response(response_data, status=201)
     
-    # try:
-    #     downloaded_df = pd.read_excel(BytesIO(result.content))
-    # except ValueError as e:
-    #     logging.error("Error reading Excel file: %s", e)
-    #     return Response({'issue': f'Error reading Excel file: {e}', 'status': 400})

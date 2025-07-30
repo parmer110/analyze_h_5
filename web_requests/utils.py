@@ -8,6 +8,9 @@ import time
 import random
 import threading
 import urllib.parse
+import copy
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from rest_framework.response import Response
 from collections import defaultdict
 from dateutil.relativedelta import relativedelta
 import pandas as pd
@@ -19,6 +22,9 @@ from itertools import islice
 from urllib.parse import unquote
 from common.locks import redlock_instance
 
+from common.models import User, Companies
+from .models import RequestsForeign
+from .serializers import DynamicRequestSerializer
 from .request_params import (
     _5_sale_entries_extraction_request_params,
     _h_extract_numbers_request_params,
@@ -213,6 +219,10 @@ def generate_intervals(
     primary_fmt = '%Y/%m/%d %H:%M:%S'
     fallback_fmt = '%Y/%m/%d %H:%M'
 
+    # Default idn to 1 day if not provided
+    if idn is None:
+        idn = {'year': 0, 'month': 0, 'day': 1, 'hour': 0, 'minute': 0, 'second': 0}
+
     # convert Jalali to Gregorian datetime
     jstart = parse_jalali_datetime(start_str, primary_fmt, fallback_fmt)
     jend   = parse_jalali_datetime(end_str,   primary_fmt, fallback_fmt)
@@ -344,7 +354,7 @@ def get_filename_and_extension_from_response(response):
     return None, None
 
 
-def extraction(request):
+def extraction(request, headers_h, headers_5, gregorian_now):
     # Functions requesting web_app
     # Will made automization
     request_handler_map = {
@@ -374,13 +384,11 @@ def extraction(request):
         query_parameters = req.get("query", None)
         idn = req.get("integration_days_num", None)
 
-        shared_dir = os.path.join(base_shared_dir, sanitize_filename(company))
-        shared_dir = os.path.join(shared_dir, sanitize_filename(name))
+        specific_dir = sanitize_filename(company)
+        specific_dir = os.path.join(specific_dir, sanitize_filename(name))
         if dir_hlp_name:
-            shared_dir = os.path.join(shared_dir, sanitize_filename(dir_hlp_name))
+            specific_dir = os.path.join(specific_dir, sanitize_filename(dir_hlp_name))
         
-        os.makedirs(shared_dir, exist_ok=True)
-
         try:
             company_inst = Companies.objects.get(name=company)
         except RequestsForeign.DoesNotExist:
@@ -424,7 +432,7 @@ def extraction(request):
             new_params[end_date_name] = interval['end_date']
 
             expanded_tasks.append((
-                method, url, headers, new_params, interval['start_date'], interval['end_date'], shared_dir, company, name, idn
+                method, url, headers, new_params, interval['start_date'], interval['end_date'], specific_dir, company, name, idn
             ))
     
     #############################
@@ -456,7 +464,6 @@ def extraction(request):
                 future = executor.submit(delayed_handle_request, delay, *task)
                 future_to_task[future] = task
 
-            completed_tasks_counter = 0
             completed_tasks = []
 
             for future in as_completed(future_to_task):
@@ -464,7 +471,7 @@ def extraction(request):
                 task = future_to_task[future]
 
                 try:
-                    result, start_date, end_date, shared_dir, company, name, idn = future.result()
+                    result, start_date, end_date, specific_dir, company, name, idn = future.result()
                 except Exception as exc:
                     failed_tasks.append(task)
                     continue
@@ -473,15 +480,15 @@ def extraction(request):
                     failed_tasks.append(task)
                     logger.error(
                         f"Error in fetching {company}'s {name} report in {start_date} to {end_date} "
-                        f"expected in {shared_dir}'s directory!"
                     )                    
                 else:
                     print(f"☻☻Success fetching {company}'s {name} report in {start_date} to {end_date}.☺☺")
 
-                    completed_tasks_counter += 1
                     completed_tasks.append(future)
 
         expanded_tasks = failed_tasks
+
+    return completed_tasks, failed_tasks
 
 
 class DummyResponse:
@@ -528,6 +535,10 @@ def merge_completed_tasks(completed_tasks):
                     's_jstr': s_jstr, 'e_jstr': e_jstr,
                     'shared_dir': shared_dir, 'company': company,
                     'name': name, 'idn': idn, 'ext': ext})
+
+    # Default idn to 1 day if not provided
+    if idn is None:
+        idn = {'year': 0, 'month': 0, 'day': 1, 'hour': 0, 'minute': 0, 'second': 0}
 
     groups = defaultdict(list)
     for item in raw:
