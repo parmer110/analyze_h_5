@@ -74,6 +74,37 @@ def _5_factors_list_request_params(serializer, gregorian_now):
 
     return params, start_dt_prm_name, end_dt_prm_name
 
+def _5_v1_extraction(serializer, gregorian_now):
+    date_gregorian = gregorian_now.date()
+    flag_CallDate = (date_gregorian - timedelta(days=1)).strftime('%Y-%m-%d')
+
+    params = {
+        'references': serializer.validated_data.get('references', []),
+        'containDeletedEntries': serializer.validated_data.get('containDeletedEntries', False),
+        'startEntryDate': serializer.validated_data.get('startEntryDate', f"{flag_CallDate} 00:00:00"),
+        'endEntryDate': serializer.validated_data.get('endEntryDate', f"{flag_CallDate} 23:59:59"),
+        'agencies': serializer.validated_data.get('agencies', []),
+        'callStatuses': serializer.validated_data.get('callStatuses', []),
+        'containDeletedEntries': serializer.validated_data.get('containDeletedEntries', False),
+        'factorSerial': serializer.validated_data.get('factorSerial', ""),
+        'factorStatuses': serializer.validated_data.get('factorStatuses', []),
+        'justDeletedEntries': serializer.validated_data.get('justDeletedEntries', False),
+        'maxCallNumber': serializer.validated_data.get('maxCallNumber', 0),
+        'maxSuccessCallNumber': serializer.validated_data.get('maxSuccessCallNumber', 0),
+        'minCallNumber': serializer.validated_data.get('minCallNumber', 0),
+        'minSuccessCallNumber': serializer.validated_data.get('minSuccessCallNumber', 0),
+        'mobile': serializer.validated_data.get('mobile', ""),
+        'numberStatuses': serializer.validated_data.get('numberStatuses', []),
+        'products': serializer.validated_data.get('products', []),
+        'withoutFactorEntries': serializer.validated_data.get('withoutFactorEntries', False),
+    }
+
+
+    return params, "startEntryDate", "endEntryDate"
+
+##############################
+##############################
+
 
 def _h_factor_index_request_params(serializer, gregorian_now):
 
@@ -154,3 +185,42 @@ def _h_reservation_index(serializer, gregorian_now):
         params['end_reserved_at'] = serializer.validated_data.get('end_reserved_at', f"{flag_CallDate} 23:59:59")
 
     return params, start_dt_prm_name, end_dt_prm_name
+
+def _h_entryـextractـnumbersـnew(serializer, gregorian_now):
+
+    date_gregorian = gregorian_now.date()
+    flag_CallDate = (date_gregorian - timedelta(days=1)).strftime('%Y-%m-%d')
+
+    params = {
+        'product_id': serializer.validated_data.get('product_id', 3),
+        'reference': serializer.validated_data.get('reference', []),
+        'entry_date_start': serializer.validated_data.get('entry_date_start', f"{flag_CallDate} 00:00:00"),
+        'entry_date_end': serializer.validated_data.get('entry_date_end', f"{flag_CallDate} 23:59:59"),
+    }
+
+    if 'agency_id' in serializer.validated_data:
+        params['agency_id'] = serializer.validated_data.get('agency_id', [])
+    if 'category_ids' in serializer.validated_data:
+        params['category_ids'] = serializer.validated_data.get('category_ids', [])
+    if 'entry_status' in serializer.validated_data:
+        params['entry_status'] = serializer.validated_data.get('entry_status', [])
+    if 'entry_voided' in serializer.validated_data:
+        params['entry_voided'] = serializer.validated_data.get('entry_voided', False)
+    if 'factor_serial' in serializer.validated_data:
+        params['factor_serial'] = serializer.validated_data.get('factor_serial', "")
+    if 'factor_status' in serializer.validated_data:
+        params['factor_status'] = serializer.validated_data.get('factor_status', [])
+    if 'max_call_count' in serializer.validated_data:
+        params['max_call_count'] = serializer.validated_data.get('max_call_count', "")
+    if 'max_call_count_success' in serializer.validated_data:
+        params['max_call_count_success'] = serializer.validated_data.get('max_call_count_success', "")
+    if 'min_call_count' in serializer.validated_data:
+        params['min_call_count'] = serializer.validated_data.get('min_call_count', "")
+    if 'min_call_count_success' in serializer.validated_data:
+        params['min_call_count_success'] = serializer.validated_data.get('min_call_count_success', "")
+    if 'mobile' in serializer.validated_data:
+        params['mobile'] = serializer.validated_data.get('mobile', "")
+    if 'type' in serializer.validated_data:
+        params['type'] = serializer.validated_data.get('type', "")
+
+    return params, 'entry_date_start', 'entry_date_end'

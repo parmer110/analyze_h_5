@@ -945,6 +945,51 @@ class noname(viewsets.ViewSet):
                 status=status.HTTP_401_UNAUTHORIZED
             )
 
+        req = [
+                {
+                    "company": "5040",
+                    "name": "v1/extraction",
+                    "body": {
+                        "agencies": [],
+                        "callStatuses": [],
+                        "containDeletedEntries": True,
+                        "endEntryDate": "",
+                        "factorSerial": "",
+                        "factorStatuses": [],
+                        "justDeletedEntries": False,
+                        "maxCallNumber": None,
+                        "maxSuccessCallNumber": None,
+                        "minCallNumber": None,
+                        "minSuccessCallNumber": None,
+                        "mobile": None,
+                        "numberStatuses": [],
+                        "products": [],
+                        "references": ["Landing", "Sms"],
+                        "startEntryDate": "",
+                        "withoutFactorEntries": False
+                    },
+                    "query": {}
+                }
+            ]        
+
+
+        # Jalali Date Time
+        jalali_now = jdatetime.datetime.now()
+        jalali_five_days_ago = jalali_now - timedelta(days=5)
+        jalali_rounded_time = jalali_now.replace(minute=0, second=0, microsecond=0)
+        formatted_jalali_date = jalali_rounded_time.strftime('%Y/%m/%d 00:00:00')
+        year_jalali = jalali_now.year
+        month_jalali = jalali_now.month
+        day_jalali = jalali_now.day
+
+
+        return Response({
+            'username': username,
+            'Now Jalalli date time': formatted_jalali_date,
+        },  status.HTTP_200_OK)
+
+
+
 
 class ArchiveViewSet(viewsets.ViewSet):
     def create(self, request):
@@ -988,8 +1033,8 @@ class ArchiveViewSet(viewsets.ViewSet):
             )
         
         headers_5 = {
-            'Authorization': f'Bearer {token_5}'
-            # 'loginExpire': loginExpire_5
+            'Authorization': f'Bearer {token_5}',
+            'loginExpire': loginExpire_5
         }
         headers_h = {
             'Authorization': f'Bearer {token_h}'

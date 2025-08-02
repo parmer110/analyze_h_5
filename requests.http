@@ -47,8 +47,8 @@ Content-Type: application/json
 [
     {
         "company": "5040",
-        "name": "factors/list",
-        "directory_helper": "ثبت",
+        "name": "v1/extraction",
+        "directory_helper": "",
         "integration_days_num": {
             "year": 0,
             "month": 0,
@@ -57,14 +57,14 @@ Content-Type: application/json
             "minute": 0,
             "second": 0
         },        
-        "body": {},
-        "query": {
-        "report": 1,
-        "filter": 1,
-        "startInvoiceDate": "1404/05/04 00:00:00",
-        "endInvoiceDate": "1404/05/04 23:59:59"
-    }
-  }  
+        "body": {
+			"containDeletedEntries": true,
+			"endEntryDate": "1404/04/10 23:59:59",
+			"references": ["Landing", "Sms"],
+			"startEntryDate": "1404/04/10 00:00:00"
+        },
+        "query": {}
+  }    
 ]
 
 
@@ -76,4 +76,23 @@ GET http://192.168.134.10:8002/web_requests/5/open_home/?username=aeshraghi
 Content-Type: application/json
 
 ###
-#
+
+
+
+# Overal Reports
+# _________________________________________
+
+# Noname
+POST http://192.168.134.10:8002/web_requests/noname/?username=aeshraghi
+Content-Type: application/json
+
+
+
+###
+# Scenario
+
+
+
+###
+#Incoming numbers
+

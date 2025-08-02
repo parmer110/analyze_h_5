@@ -11,6 +11,8 @@ import urllib.parse
 import copy
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.exceptions import ValidationError
 from collections import defaultdict
 from dateutil.relativedelta import relativedelta
 import pandas as pd
@@ -34,6 +36,8 @@ from .request_params import (
     _h_factor_index_request_params,
     _h_accounting_call_log_index,
     _h_reservation_index,
+    _5_v1_extraction,
+    _5_v1_extraction
 )
 
 logger = logging.getLogger(__name__)
@@ -119,14 +123,14 @@ def handle_request(method, url, headers, data, start_date, end_date, shared_dir,
             try:
                 print(f'→ count: {counter}, url: {url}, start date: {start_date}, end date: {end_date}←')
                 response = requests.get(url, headers=headers, params=data, timeout=1200)
-                print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
+                print("sa↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
                 print(response)
             except requests.exceptions.ConnectionError:
-                print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
+                print("fb↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
                 print("requests.exceptions.ConnectionError")
                 response = None
             except requests.exceptions.Timeout:
-                print("↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
+                print("fc↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
                 print("requests.exceptions.Timeout")
                 response = None
             finally:
@@ -370,6 +374,9 @@ def extraction(request, headers_h, headers_5, gregorian_now):
         ('hamkadeh', 'accounting/call-log/index'): _h_accounting_call_log_index,
 
         ('hamkadeh', 'reservation/index'): _h_reservation_index,
+
+        ('5040', 'v1/extraction'): _5_v1_extraction,
+        ('hamkadeh', 'entry/extract-numbers-new'): _h_factor_index_request_params,
     }
 
     # Dynamic Serializer: Iteration loop over each company-name request perform data valication and initalize.
@@ -403,8 +410,10 @@ def extraction(request, headers_h, headers_5, gregorian_now):
         serializer = DynamicRequestSerializer(data={**body_parameters, **query_parameters}, request_foreign=request_instance)
 
         if not serializer.is_valid():
-            return Response({f'Company "{company}", Request "{name}" serializer error!':serializer.errors, 'status':412})
-
+            raise ValidationError(
+                {f'Company "{company}", Request "{name}" serializer error!': serializer.errors}
+            )
+        
         company_name_pair = (company, name)
         if company_name_pair in request_handler_map:
             parameters, start_date_name, end_date_name  = request_handler_map[company_name_pair](serializer, gregorian_now)
