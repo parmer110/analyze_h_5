@@ -37,7 +37,7 @@ from .request_params import (
     _h_accounting_call_log_index,
     _h_reservation_index,
     _5_v1_extraction,
-    _5_v1_extraction
+    _h_entryـextractـnumbersـnew,
 )
 
 logger = logging.getLogger(__name__)
@@ -123,14 +123,11 @@ def handle_request(method, url, headers, data, start_date, end_date, shared_dir,
             try:
                 print(f'→ count: {counter}, url: {url}, start date: {start_date}, end date: {end_date}←')
                 response = requests.get(url, headers=headers, params=data, timeout=1200)
-                print("sa↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
                 print(response)
             except requests.exceptions.ConnectionError:
-                print("fb↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
                 print("requests.exceptions.ConnectionError")
                 response = None
             except requests.exceptions.Timeout:
-                print("fc↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓")
                 print("requests.exceptions.Timeout")
                 response = None
             finally:
@@ -165,6 +162,7 @@ def handle_request(method, url, headers, data, start_date, end_date, shared_dir,
                 # Debug
                 print(f'◄count: {counter}, url: {url}, start date: {start_date}, end date: {end_date}►')
                 response = requests.post(url, headers=headers, json=data, timeout=1200)
+                print(response)
             except requests.exceptions.ConnectionError:
                 response = None
             except requests.exceptions.Timeout:
@@ -376,12 +374,11 @@ def extraction(request, headers_h, headers_5, gregorian_now):
         ('hamkadeh', 'reservation/index'): _h_reservation_index,
 
         ('5040', 'v1/extraction'): _5_v1_extraction,
-        ('hamkadeh', 'entry/extract-numbers-new'): _h_factor_index_request_params,
+        ('hamkadeh', 'entry/extract-numbers-new'): _h_entryـextractـnumbersـnew,
     }
 
     # Dynamic Serializer: Iteration loop over each company-name request perform data valication and initalize.
     expanded_tasks = []
-    
     for req in request.data:
 
         company = req.get("company").lower()
@@ -448,7 +445,6 @@ def extraction(request, headers_h, headers_5, gregorian_now):
     # Preparing requested data download
     max_retries = 5
     retry_count = 0
-
     while expanded_tasks and retry_count < max_retries:
         delay = random.randint(1 * 60, 10 * 60)  # seconds
         retry_count += 1
@@ -536,8 +532,8 @@ def merge_completed_tasks(completed_tasks):
     raw = []
     for fut in completed_tasks:
         resp, s_jstr, e_jstr, shared_dir, company, name, idn = fut.result()
-        s_dt = jdatetime.datetime.strptime(s_jstr, '%Y/%m/%d %H:%M:%S').togregorian()
-        e_dt = jdatetime.datetime.strptime(e_jstr, '%Y/%m/%d %H:%M:%S').togregorian()
+        s_dt = datetime.datetime.strptime(s_jstr, '%Y/%m/%d %H:%M:%S')
+        e_dt = datetime.datetime.strptime(e_jstr, '%Y/%m/%d %H:%M:%S')
         cd = getattr(resp, 'headers', {}).get('Content-Disposition', '')
         ext = 'csv' if '.csv' in cd.lower() else 'xlsx'
         raw.append({'resp': resp, 's_dt': s_dt, 'e_dt': e_dt,

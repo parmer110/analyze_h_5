@@ -44,28 +44,30 @@ Content-Type: application/json
 POST http://192.168.134.10:8002/web_requests/archive/?username=aeshraghi
 Content-Type: application/json
 
+
 [
-    {
-        "company": "5040",
-        "name": "v1/extraction",
-        "directory_helper": "",
+  {
+    "company": "5040",
+    "name": "call/logs/list",
+    "directory_helper": "",
         "integration_days_num": {
             "year": 0,
             "month": 0,
-            "day": 1,
+            "day": 6,
             "hour": 0,
             "minute": 0,
             "second": 0
-        },        
-        "body": {
-			"containDeletedEntries": true,
-			"endEntryDate": "1404/04/10 23:59:59",
-			"references": ["Landing", "Sms"],
-			"startEntryDate": "1404/04/10 00:00:00"
         },
-        "query": {}
+    "body": {},
+    "query": {
+        "report": 1,
+        "filter": 1,
+        "startCallDate": "1403/05/09 00:00:00",
+        "endCallDate": "1403/05/14 00:00:00"
+    }
   }    
 ]
+
 
 
 ###
