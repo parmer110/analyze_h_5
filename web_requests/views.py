@@ -13,6 +13,8 @@ import logging
 import ast
 import threading
 import copy
+import string
+import curlify
 from django.http import JsonResponse
 from django.http import HttpResponse
 from django.utils import timezone
@@ -64,6 +66,13 @@ from .request_params import (
 
 logger = logging.getLogger(__name__)
 
+# Generate a pseudo-random "t" query parameter similar to what the browser's Socket.IO client uses.
+# This value changes on each request to prevent caching and to make the handshake unique.
+def generate_t_value() -> str:
+    """Return a short pseudo-random string + millisecond timestamp, used as 't' cache-busting query."""
+    rand = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
+    return f"{rand}{int(time.time() * 1000)}"
+
 class LoginViewSetHamkadeh(viewsets.ViewSet):
     def create(self, request):
         serializer = LoginSerializer(data=request.data)
@@ -78,8 +87,38 @@ class LoginViewSetHamkadeh(viewsets.ViewSet):
                     {'message': f"User {username} does not exist!"},
                     status=status.HTTP_401_UNAUTHORIZED
                 )
+            
+            session = requests.Session()
 
-            response = requests.post('https://api.hamkadeh.com/api/auth/login/send-code', json=serializer.validated_data)
+            t_value = generate_t_value()
+
+            headers={
+                "Origin": "https://samane.hamkadeh.com",
+                "Referer": "https://samane.hamkadeh.com/dashboard",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+            }
+
+            url = f"https://api.hamkadeh.com:6003/socket.io/?EIO=3&transport=polling&t={t_value}"
+            response = session.get(url, headers=headers)
+
+
+            print(f'socket.io response: {response.cookies.get_dict()}')
+            print(f'socket.io session: {session.cookies.get_dict()}')
+
+            # cookies = session.cookies.get_dict()
+            # io_cookie = session.cookies.get('io')
+
+            headers["Content-Type"] = "application/json"
+
+            url = 'https://api.hamkadeh.com/api/auth/login/send-code'
+            response = session.post(url, headers=headers, json=serializer.validated_data)
+
+            print(f'send-code response: {response.cookies.get_dict()}')
+            print(f'send-code session: {session.cookies.get_dict()}')
+
+            # response = requests.Request('POST', 'https://api.hamkadeh.com/api/auth/login/send-code', json=serializer.validated_data)
+            # prepared = response.prepare()
+            # print(curlify.to_curl(prepared))
 
             # Prompt user input for SMS code
             sms_code = None
@@ -90,11 +129,20 @@ class LoginViewSetHamkadeh(viewsets.ViewSet):
             
             login_data = {
                 "username": serializer.validated_data["username"],
-                "password": serializer.validated_data["password"],
-                "sms_code": sms_code
+                "code": sms_code
             }
 
-            response = requests.post('https://api.hamkadeh.com/api/auth/login', json=login_data)
+            print("←←←←←←←←←←←←←←←←←←←←←←←")
+            print(login_data)
+
+            url = 'https://api.hamkadeh.com/api/auth/login'
+            response = session.post(url, headers=headers, json=login_data)
+
+            print(f'login response: {response.cookies.get_dict()}')
+            print(f'login session: {session.cookies.get_dict()}')
+
+            return Response(response.json())
+
             log = RequestLog.objects.create(
                 request_name = 'login Hamkadeh',
                 username=serializer.validated_data['username'],
@@ -103,12 +151,19 @@ class LoginViewSetHamkadeh(viewsets.ViewSet):
                 response_data=response.json()
             )
 
+            print(f'response: {response.cookies.get_dict()}')
+            print(f'session: {session.cookies.get_dict()}')
+        
             token_h = response.json().get('token')
+            print(f'token_h: {token_h}')
+            io = response.json().get('io')
+            print(f'io: {io}')
             if token_h:
                 WebTokens.objects.update_or_create(user=user, name="token_h", defaults={'value': token_h})
                 request.session['token_h'] = token_h
 
             # Valid
+            print("↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑")
             return Response(response.json())
         
         return Response(serializer.errors, status=400)

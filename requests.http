@@ -46,26 +46,18 @@ Content-Type: application/json
 
 
 [
-  {
-    "company": "5040",
-    "name": "call/logs/list",
-    "directory_helper": "",
-        "integration_days_num": {
-            "year": 0,
-            "month": 0,
-            "day": 6,
-            "hour": 0,
-            "minute": 0,
-            "second": 0
+    {
+        "company": "hamkadeh",
+        "name": "entry/extract-numbers-new",
+        "directory_helper": "",
+        "body": {
+			"product_id": 3,
+			"entry_date_start": "1404/04/10 00:00:00",
+			"reference": ["landing", "sms"],
+			"entry_date_end": "1404/04/10 23:59:59"
         },
-    "body": {},
-    "query": {
-        "report": 1,
-        "filter": 1,
-        "startCallDate": "1403/05/09 00:00:00",
-        "endCallDate": "1403/05/14 00:00:00"
-    }
-  }    
+        "query": {}
+  }      
 ]
 
 

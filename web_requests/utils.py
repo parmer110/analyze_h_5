@@ -9,6 +9,7 @@ import random
 import threading
 import urllib.parse
 import copy
+import curlify
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from rest_framework.response import Response
 from rest_framework import status
@@ -162,10 +163,17 @@ def handle_request(method, url, headers, data, start_date, end_date, shared_dir,
                 # Debug
                 print(f'◄count: {counter}, url: {url}, start date: {start_date}, end date: {end_date}►')
                 response = requests.post(url, headers=headers, json=data, timeout=1200)
-                print(response)
+                
+                # req = requests.Request('POST', url, headers=headers, json=data)
+                # prepared = req.prepare()
+                # print("req☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼")
+                # print(curlify.to_curl(prepared))
+                
             except requests.exceptions.ConnectionError:
+                print("requests.exceptions.ConnectionError")
                 response = None
             except requests.exceptions.Timeout:
+                print("requests.exceptions.Timeout")
                 response = None
 
             if response is not None and response.ok:
@@ -541,10 +549,6 @@ def merge_completed_tasks(completed_tasks):
                     'shared_dir': shared_dir, 'company': company,
                     'name': name, 'idn': idn, 'ext': ext})
 
-    # Default idn to 1 day if not provided
-    if idn is None:
-        idn = {'year': 0, 'month': 0, 'day': 1, 'hour': 0, 'minute': 0, 'second': 0}
-
     groups = defaultdict(list)
     for item in raw:
         groups[item['shared_dir']].append(item)
@@ -552,6 +556,9 @@ def merge_completed_tasks(completed_tasks):
     merged_tasks = []
     for shared_dir, items in groups.items():
         idn = items[0]['idn']
+        # Default idn to 1 day if not provided
+        if idn is None:
+            idn = {'year': 0, 'month': 0, 'day': 1, 'hour': 0, 'minute': 0, 'second': 0}
         secs = (idn.get('year',0)*365*86400 + idn.get('month',0)*30*86400 +
                 idn.get('day',0)*86400 + idn.get('hour',0)*3600 +
                 idn.get('minute',0)*60 + idn.get('second',0))
