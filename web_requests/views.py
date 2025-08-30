@@ -1056,11 +1056,6 @@ class ArchiveViewSet(viewsets.ViewSet):
             # Hamkadeh
             token_h = WebTokens.objects.get(user=user, name='token_h').value
             io_h = WebTokens.objects.get(user=user, name='io_h').value
-            headers={
-                "Origin": "https://samane.hamkadeh.com",
-                "Referer": "https://samane.hamkadeh.com/dashboard",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-            }
 
         except WebTokens.DoesNotExist:
             return Response(
@@ -1073,9 +1068,13 @@ class ArchiveViewSet(viewsets.ViewSet):
             'loginExpire': loginExpire_5
         }
         headers_h = {
-            'Authorization': f'Bearer {token_h}'
+            "Origin": "https://samane.hamkadeh.com",
+            "Referer": "https://samane.hamkadeh.com/",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Accept": "application/json, text/plain, */*",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Cookie": f"token={token_h}; io={io_h}"
         }
-
 
         #############################
         # Preparing download and gadering tasks
@@ -1095,6 +1094,7 @@ class ArchiveViewSet(viewsets.ViewSet):
             os.makedirs(shared_dir, exist_ok=True)
 
             filename, ext = get_filename_and_extension_from_response(result)
+            
 
             start_date = datetime.datetime.strptime(start_date, '%Y/%m/%d %H:%M:%S')
             start_date = jdatetime.datetime.fromgregorian(date=start_date).strftime('%Y_%m_%d_%H_%M_%S')

@@ -112,6 +112,25 @@ def _perform_refresh(username: str):
     resp.raise_for_status()
     logger.info(f"[Refresh] Completed with status {resp.status_code}")
 
+def debug_request(method, url, **kwargs):
+    """
+    اجرای یک درخواست با requests و چاپ معادل cURL برای دیباگ
+    """
+    # درخواست رو بساز
+    req = requests.Request(method, url, **kwargs)
+    prepared = req.prepare()
+
+    # چاپ معادل cURL
+    print("=== cURL ===")
+    print(curlify.to_curl(prepared))
+    print("============")
+
+    # ارسال درخواست
+    with requests.Session() as s:
+        resp = s.send(prepared, timeout=kwargs.get("timeout", 30))
+    
+    return resp
+
 def handle_request(method, url, headers, data, start_date, end_date, shared_dir, company, name, idn):
     response = None
     counter = 0
@@ -163,12 +182,36 @@ def handle_request(method, url, headers, data, start_date, end_date, shared_dir,
                 # Debug
                 print(f'◄count: {counter}, url: {url}, start date: {start_date}, end date: {end_date}►')
                 response = requests.post(url, headers=headers, json=data, timeout=1200)
+                # url = "https://api.hamkadeh.com/api/entry/extract-numbers-new"
+
+                # headers = {
+                # #     # "accept": "application/json, text/plain, */*",
+                # #     # "origin": "https://samane.hamkadeh.com",
+                # #     # "referer": "https://samane.hamkadeh.com/",
+                # #     # "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                # #     # "content-type": "application/json",
+                #     "cookie": "io=XJcvBhQYLYfkYwbRCXZh; token=78002%7CBwoiTi48KzoxEH0IGBf7Y2xOntmLhTANdRVhiledda1b5da9",
+                # }
+
+                # data = {
+                #     "product_id": 3,
+                #     "reference": ["landing", "sms"],
+                #     "entry_date_start": "2025-08-27 00:00",
+                #     "entry_date_end": "2025-08-27 18:00",
+                # }
+                # response = requests.post(url, headers=headers, json=data, timeout=1200)
+                # Debug
+                # response = debug_request("POST", url, headers=headers, json=data)
+                # print(response.status_code)
+                # print(response.json())
+                # print("↑↑↑↑↑↑↑↑↑↑↑↑↑↑")
+
+                # req = requests.Request("POST", url, headers=headers, data=data)
                 
-                # req = requests.Request('POST', url, headers=headers, json=data)
                 # prepared = req.prepare()
                 # print("req☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼")
                 # print(curlify.to_curl(prepared))
-                
+
             except requests.exceptions.ConnectionError:
                 print("requests.exceptions.ConnectionError")
                 response = None
@@ -348,18 +391,24 @@ def get_filename_and_extension_from_response(response):
         return filename, extension
 
     # Try normal filename=
-    match_ascii = re.search(r'filename="?([^"]+)"?', content_disposition)
+    match_ascii = re.search(r'filename\*?="?([^";]+)"?', content_disposition)
     if match_ascii:
         filename = match_ascii.group(1)
         extension = filename.split('.')[-1].lower() if '.' in filename else None
         return filename, extension
 
+    mime_map = {
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+        'application/vnd.ms-excel': 'xls',
+        'text/csv': 'csv',
+        'application/pdf': 'pdf',
+    }
+
     # Fallback: try Content-Type header
     content_type = response.headers.get('Content-Type', '').lower()
-    if 'excel' in content_type:
-        return None, 'xlsx'
-    elif 'csv' in content_type:
-        return None, 'csv'
+    for mime, ext in mime_map.items():
+        if mime in content_type:
+            return None, ext
 
     return None, None
 
@@ -468,7 +517,7 @@ def extraction(request, headers_h, headers_5, gregorian_now):
             time.sleep(delay)
             return handle_request(*task_args)
 
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        with ThreadPoolExecutor(max_workers=7) as executor:
             future_to_task = {}
             for idx, task in enumerate(expanded_tasks):
                 interval = random.randint(1, 12)  # seconds
