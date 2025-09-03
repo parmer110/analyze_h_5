@@ -54,8 +54,8 @@ Content-Type: application/json
 	"query": {
 		"report": 1,
 		"filter": 1,
-		"startCallDate": "1404/06/07 00:00:00",
-		"endCallDate": "1404/06/07 23:59:59"
+		"startCallDate": "1404/06/11 00:00:00",
+		"endCallDate": "1404/06/11 23:59:59"
 	}
 },
 {
@@ -65,8 +65,8 @@ Content-Type: application/json
 	"body": {},
 	"query": {
 		"export_data": 1,
-		"start_call_from": "1404/06/07 00:00:00",
-		"start_call_to": "1404/06/07 23:59:59"
+		"start_call_from": "1404/06/11 00:00:00",
+		"start_call_to": "1404/06/11 23:59:59"
 	}
 },
 {
@@ -76,8 +76,8 @@ Content-Type: application/json
 	"body": {},
 	"query": {
 		"export_data": 1,
-		"start_created_at": "1404/06/07 00:00:00",
-		"end_created_at": "1404/06/07 23:59:59"
+		"start_created_at": "1404/06/11 00:00:00",
+		"end_created_at": "1404/06/11 23:59:59"
 	}
 },
 {
@@ -87,8 +87,8 @@ Content-Type: application/json
 	"body": {},
 	"query": {
 		"export_data": 1,
-		"start_accept_action_date": "1404/06/07 00:00:00",
-		"end_accept_action_date": "1404/06/07 23:59:59",
+		"start_accept_action_date": "1404/06/11 00:00:00",
+		"end_accept_action_date": "1404/06/11 23:59:59",
 		"receipt_status": "accepted ",
 		"status": "PAID"
 	}
@@ -101,8 +101,8 @@ Content-Type: application/json
 	"query": {
 		"report": 1,
 		"filter": 1,
-		"startInvoiceDate": "1404/06/07 00:00:00",
-		"endInvoiceDate": "1404/06/07 23:59:59"
+		"startInvoiceDate": "1404/06/11 00:00:00",
+		"endInvoiceDate": "1404/06/11 23:59:59"
 	}
 },
 {
@@ -113,8 +113,8 @@ Content-Type: application/json
 	"query": {
 		"report": 1,
 		"filter": 1,
-		"startPayAcceptDate": "1404/06/07 00:00:00",
-		"endPayAcceptDate": "1404/06/07 23:59:59",
+		"startPayAcceptDate": "1404/06/11 00:00:00",
+		"endPayAcceptDate": "1404/06/11 23:59:59",
 		"payStatus": "paid"
 	}
 },
@@ -132,9 +132,9 @@ Content-Type: application/json
 	},        
 	"body": {
 		"containDeletedEntries": true,
-		"startEntryDate": "1404/06/07 00:00:00",
-		"references": ["Landing", "sms"],
-		"endEntryDate": "1404/06/07 23:59:59"
+		"startEntryDate": "1404/06/11 00:00:00",
+		"endEntryDate": "1404/06/11 23:59:59",
+		"references": ["Landing", "sms"]
 	},
 	"query": {}
 }

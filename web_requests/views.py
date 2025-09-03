@@ -50,28 +50,13 @@ from common.models import User, Companies
 from scheduler.tasks import open_browser
 from .utils import (
     handle_request, generate_intervals, extract_filename, sanitize_filename, fallback_extract, remove_all_extensions,
-    get_filename_and_extension_from_response, merge_completed_tasks, extraction
-)
-from .request_params import (
-    _5_sale_entries_extraction_request_params,
-    _h_extract_numbers_request_params,
-    _5_call_logs_list_request_params,
-    _h_call_log_index_request_params,
-    _5_factors_list_request_params,
-    _h_factor_index_request_params,
-    _h_accounting_call_log_index,
-    _h_reservation_index,
+    get_filename_and_extension_from_response, merge_completed_tasks, extraction, run_playwright_for_login_5040,
+    schedule_cancelation, run_playwright_for_refresh, generate_t_value, schedule_refresh_job
 )
 
 
 logger = logging.getLogger(__name__)
 
-# Generate a pseudo-random "t" query parameter similar to what the browser's Socket.IO client uses.
-# This value changes on each request to prevent caching and to make the handshake unique.
-def generate_t_value() -> str:
-    """Return a short pseudo-random string + millisecond timestamp, used as 't' cache-busting query."""
-    rand = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
-    return f"{rand}{int(time.time() * 1000)}"
 
 class LoginViewSetHamkadeh(viewsets.ViewSet):
     def create(self, request):
@@ -144,76 +129,6 @@ class LoginViewSetHamkadeh(viewsets.ViewSet):
         return Response(serializer.errors, status=400)
 
 
-def schedule_refresh_job(user, kwargs, interval_minutes=None):
-    """
-    Create or update a Django-Q schedule for refreshing the 5040 login.
-    Uses a unique schedule name per user to avoid duplicates.
-
-    If interval_minutes is None, selects a random interval between 10 and 30 minutes.
-    """
-    task_name = f"web_request_5040_refresh_{user.username}"
-    now = timezone.now()
-    minutes = interval_minutes if interval_minutes is not None else random.randint(5, 40)
-    seconds = random.randint(0, 59)
-    try:
-        # Update existing schedule
-        sch = Schedule.objects.get(name=task_name)
-        sch.next_run = now + timezone.timedelta(minutes=minutes, seconds=seconds)
-        sch.stopped = False
-        sch.kwargs = {'username': user.username, **kwargs}
-        sch.repeats=1
-        sch.save()
-
-    except Schedule.DoesNotExist:
-        # Create new schedule
-        schedule(
-            'scheduler.tasks.web_request_5040_refresh',
-            name=task_name,
-            schedule_type='I',
-            minutes=minutes,
-            next_run=now + timezone.timedelta(minutes=minutes, seconds=seconds),
-            repeats=1,
-            kwargs={'username': user.username, **kwargs}
-        )
-
-
-def run_playwright_for_login_5040(username, password):
-    """
-    Use Playwright to perform login on panel.5040.me,
-    prompt the user for the SMS code, and return cookies.
-    """
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context()
-        page = context.new_page()
-        page.goto('https://panel.5040.me/auth/login', timeout=60000)
-
-        # Fill in credentials and request SMS code
-        page.fill('input[name="login-username"]', username)
-        page.fill('input[name="password"]', password)
-        page.click('button:has-text("ارسال کد با پیامک")')
-        page.wait_for_load_state('networkidle')
-
-        # Prompt user input for SMS code
-        sms_code = None
-        while not sms_code:
-            code = input("Enter the SMS code: ")
-            if code.isdigit():
-                sms_code = code
-
-        # Complete login with SMS code
-        page.fill('input[name="login-code"]', sms_code)
-        with page.expect_response(
-            lambda resp: "api/auth/login" in resp.url and resp.status == 200,
-            timeout=60000
-        ):
-            page.click('button:has-text("ورود به سیستم")')
-
-        page.wait_for_load_state('networkidle')
-        cookies = context.cookies('https://panel.5040.me')
-        browser.close()
-        return cookies, sms_code
-
 
 class LoginViewSet5040(viewsets.ViewSet):
     """
@@ -280,65 +195,6 @@ class LoginViewSet5040(viewsets.ViewSet):
         interval_minutes = None # For testing short interval schedule
         schedule_refresh_job(user, token_kwargs, interval_minutes)
         return Response({'message': 'Login successful', 'cookies': cookies})
-
-
-def schedule_cancelation(task_name):
-    """
-    Stop a scheduled task by its unique name.
-    """
-    try:
-        task = Schedule.objects.get(name=task_name)
-        task.stopped = True
-        task.save()
-    except Schedule.DoesNotExist:
-        pass
-
-
-async def run_playwright_for_refresh(token, loginExpire):
-    """
-    Use Playwright to open the 5040 panel
-    and verify session freshness.
-    """
-    def _sync_refresh():
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context()
-            # Add existing cookies for refresh
-            context.add_cookies([
-                {'name': 'token', 'value': token, 'domain': 'panel.5040.me', 'path': '/'},
-                {'name': 'loginExpire', 'value': loginExpire, 'domain': 'panel.5040.me', 'path': '/'},
-            ])
-            page = context.new_page()
-
-            max_retries = 3
-            delay = random.randint(2 * 60, 7 * 60)  # seconds
-
-            for attempt in range(max_retries):
-                try:
-                    page.goto('https://panel.5040.me/', timeout=60000)
-                    break  # Exit the loop if successful
-                except Exception as e:
-                    current_time = datetime.datetime.now().strftime('%H:%M:%S')
-                    logging.error(f"→→ Error found: page.goto, in {current_time})←← navigating to URL: {e}")
-                    if attempt < max_retries:
-                        logging.error(f'Retrying in {delay} seconds...')
-                        time.sleep(delay)
-                    else:
-                        logging.error('Max retries reached, giving up.')
-
-
-            try:
-                page.goto('https://panel.5040.me/', timeout=60000)
-            except Exception as e:
-                logging.error(f'Error navigating to URL: {e}')
-            
-            page.wait_for_load_state('networkidle')
-            login_form = page.query_selector('form.auth-login-form.mt-2')
-            cookies = context.cookies('https://panel.5040.me')
-            browser.close()
-            return login_form, cookies
-
-    return await asyncio.to_thread(_sync_refresh)
 
 
 class RefreshSessionViewSet5040(viewsets.ViewSet):

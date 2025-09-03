@@ -10,6 +10,12 @@ import threading
 import urllib.parse
 import copy
 import curlify
+import asyncio
+import string
+from django.utils import timezone
+from django_q.tasks import schedule
+from django_q.models import Schedule
+from playwright.sync_api import sync_playwright
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from rest_framework.response import Response
 from rest_framework import status
@@ -26,7 +32,7 @@ from urllib.parse import unquote
 from common.locks import redlock_instance
 
 from common.models import User, Companies
-from .models import RequestsForeign
+from .models import RequestsForeign, WebTokens
 from .serializers import DynamicRequestSerializer
 from .request_params import (
     _5_sale_entries_extraction_request_params,
@@ -62,6 +68,14 @@ def fetch_data():
     }
     response = requests.post(url, params=params, headers=headers)
     return response.content
+
+
+# Generate a pseudo-random "t" query parameter similar to what the browser's Socket.IO client uses.
+# This value changes on each request to prevent caching and to make the handshake unique.
+def generate_t_value() -> str:
+    """Return a short pseudo-random string + millisecond timestamp, used as 't' cache-busting query."""
+    rand = ''.join(random.choices(string.ascii_letters + string.digits, k=6))
+    return f"{rand}{int(time.time() * 1000)}"
 
 
 def run_once_under_lock(lock_key: str,
@@ -185,32 +199,34 @@ def handle_request(method, url, headers, data, start_date, end_date, shared_dir,
                 # url = "https://api.hamkadeh.com/api/entry/extract-numbers-new"
 
                 # headers = {
-                # #     # "accept": "application/json, text/plain, */*",
-                # #     # "origin": "https://samane.hamkadeh.com",
-                # #     # "referer": "https://samane.hamkadeh.com/",
-                # #     # "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                # #     # "content-type": "application/json",
+                #     "accept": "application/json, text/plain, */*",
+                #     "origin": "https://samane.hamkadeh.com",
+                #     "referer": "https://samane.hamkadeh.com/",
+                #     "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                #     "content-type": "application/json",
                 #     "cookie": "io=XJcvBhQYLYfkYwbRCXZh; token=78002%7CBwoiTi48KzoxEH0IGBf7Y2xOntmLhTANdRVhiledda1b5da9",
                 # }
 
                 # data = {
                 #     "product_id": 3,
                 #     "reference": ["landing", "sms"],
-                #     "entry_date_start": "2025-08-27 00:00",
-                #     "entry_date_end": "2025-08-27 18:00",
+                #     "entry_date_start": "2025-08-30 00:00:00",
+                #     "entry_date_end": "2025-08-30 23:59:59",
                 # }
                 # response = requests.post(url, headers=headers, json=data, timeout=1200)
                 # Debug
                 # response = debug_request("POST", url, headers=headers, json=data)
+                # print("stat☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼")
                 # print(response.status_code)
                 # print(response.json())
-                # print("↑↑↑↑↑↑↑↑↑↑↑↑↑↑")
+                # print("↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑")
 
                 # req = requests.Request("POST", url, headers=headers, data=data)
                 
                 # prepared = req.prepare()
                 # print("req☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼")
                 # print(curlify.to_curl(prepared))
+                # print("↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑")
 
             except requests.exceptions.ConnectionError:
                 print("requests.exceptions.ConnectionError")
@@ -502,7 +518,11 @@ def extraction(request, headers_h, headers_5, gregorian_now):
     # Preparing requested data download
     max_retries = 5
     retry_count = 0
+    completed_tasks = []
     while expanded_tasks and retry_count < max_retries:
+        # Refreshing targets
+        
+
         delay = random.randint(1 * 60, 10 * 60)  # seconds
         retry_count += 1
 
@@ -526,7 +546,6 @@ def extraction(request, headers_h, headers_5, gregorian_now):
                 future = executor.submit(delayed_handle_request, delay, *task)
                 future_to_task[future] = task
 
-            completed_tasks = []
 
             for future in as_completed(future_to_task):
                 
@@ -673,3 +692,183 @@ def merge_completed_tasks(completed_tasks):
                 cur_end_dt = it['e_dt']
         flush_batch()
     return merged_tasks
+
+
+def run_playwright_for_login_5040(username, password):
+    """
+    Use Playwright to perform login on panel.5040.me,
+    prompt the user for the SMS code, and return cookies.
+    """
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context()
+        page = context.new_page()
+        page.goto('https://panel.5040.me/auth/login', timeout=60000)
+
+        # Fill in credentials and request SMS code
+        page.fill('input[name="login-username"]', username)
+        page.fill('input[name="password"]', password)
+        page.click('button:has-text("ارسال کد با پیامک")')
+        page.wait_for_load_state('networkidle')
+
+        # Prompt user input for SMS code
+        sms_code = None
+        while not sms_code:
+            code = input("Enter the SMS code: ")
+            if code.isdigit():
+                sms_code = code
+
+        # Complete login with SMS code
+        page.fill('input[name="login-code"]', sms_code)
+        with page.expect_response(
+            lambda resp: "api/auth/login" in resp.url and resp.status == 200,
+            timeout=60000
+        ):
+            page.click('button:has-text("ورود به سیستم")')
+
+        page.wait_for_load_state('networkidle')
+        cookies = context.cookies('https://panel.5040.me')
+        browser.close()
+        return cookies, sms_code
+
+
+def schedule_cancelation(task_name):
+    """
+    Stop a scheduled task by its unique name.
+    """
+    try:
+        task = Schedule.objects.get(name=task_name)
+        task.stopped = True
+        task.save()
+    except Schedule.DoesNotExist:
+        pass
+
+
+async def run_playwright_for_refresh(token, loginExpire):
+    """
+    Use Playwright to open the 5040 panel
+    and verify session freshness.
+    """
+    def _sync_refresh():
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context()
+            # Add existing cookies for refresh
+            context.add_cookies([
+                {'name': 'token', 'value': token, 'domain': 'panel.5040.me', 'path': '/'},
+                {'name': 'loginExpire', 'value': loginExpire, 'domain': 'panel.5040.me', 'path': '/'},
+            ])
+            page = context.new_page()
+
+            max_retries = 3
+            delay = random.randint(2 * 60, 7 * 60)  # seconds
+
+            for attempt in range(max_retries):
+                try:
+                    page.goto('https://panel.5040.me/', timeout=60000)
+                    break  # Exit the loop if successful
+                except Exception as e:
+                    current_time = datetime.datetime.now().strftime('%H:%M:%S')
+                    logging.error(f"→→ Error found: page.goto, in {current_time})←← navigating to URL: {e}")
+                    if attempt < max_retries:
+                        logging.error(f'Retrying in {delay} seconds...')
+                        time.sleep(delay)
+                    else:
+                        logging.error('Max retries reached, giving up.')
+
+
+            try:
+                page.goto('https://panel.5040.me/', timeout=60000)
+            except Exception as e:
+                logging.error(f'Error navigating to URL: {e}')
+            
+            page.wait_for_load_state('networkidle')
+            login_form = page.query_selector('form.auth-login-form.mt-2')
+            cookies = context.cookies('https://panel.5040.me')
+            browser.close()
+            return login_form, cookies
+
+    return await asyncio.to_thread(_sync_refresh)
+
+def schedule_refresh_job(user, kwargs, interval_minutes=None):
+    """
+    Create or update a Django-Q schedule for refreshing the 5040 login.
+    Uses a unique schedule name per user to avoid duplicates.
+
+    If interval_minutes is None, selects a random interval between 10 and 30 minutes.
+    """
+    task_name = f"web_request_5040_refresh_{user.username}"
+    now = timezone.now()
+    minutes = interval_minutes if interval_minutes is not None else random.randint(5, 40)
+    seconds = random.randint(0, 59)
+    try:
+        # Update existing schedule
+        sch = Schedule.objects.get(name=task_name)
+        sch.next_run = now + timezone.timedelta(minutes=minutes, seconds=seconds)
+        sch.stopped = False
+        sch.kwargs = {'username': user.username, **kwargs}
+        sch.repeats=1
+        sch.save()
+
+    except Schedule.DoesNotExist:
+        # Create new schedule
+        schedule(
+            'scheduler.tasks.web_request_5040_refresh',
+            name=task_name,
+            schedule_type='I',
+            minutes=minutes,
+            next_run=now + timezone.timedelta(minutes=minutes, seconds=seconds),
+            repeats=1,
+            kwargs={'username': user.username, **kwargs}
+        )
+
+
+class Missing(Exception):
+    pass
+
+def refresh_5040(username):
+    
+    # Load user object from DB
+    try:
+        user = User.objects.get(username=username)
+    except User.DoesNotExist:
+        # Return error if user does not exist
+        return Response(
+            {'message': 'User not found'},
+            status=status.HTTP_401_UNAUTHORIZED
+        )
+
+    # Load tokens from DB
+    try:
+        token = WebTokens.objects.get(user=user, name='token_5').value
+        loginExpire = WebTokens.objects.get(user=user, name='loginExpire_5').value
+    except WebTokens.DoesNotExist:
+        raise Missing("Tokens missing")
+
+    count_refresh_5 = 0
+    while(True):
+        result = asyncio.run(run_playwright_for_refresh(token, loginExpire))
+        login_form, cookies = result
+
+        if login_form:
+            print(f"♠♠Login issued, Preparing refresh 5040!")
+            if count_refresh_5 > 3:
+                # Session expired; cancel scheduled job
+                task_name = f"web_request_5040_refresh_{user.username}"
+                schedule_cancelation(task_name)
+                return None
+            else:
+                count_refresh_5 += 1
+                delay = random.randint(3, 10)  # seconds
+                time.sleep(delay)
+        else:
+            break
+    
+    # Update WebTokens with fresh cookies
+    cookie_map = {'token': 'token_5', 'loginExpire': 'loginExpire_5'}
+    refresh_kwargs = {}
+    for c in cookies:
+        key = cookie_map.get(c['name'])
+        if key:
+            refresh_kwargs[key] = c['value']
+            WebTokens.objects.filter(user=user, name=key).update(value=c['value'])
