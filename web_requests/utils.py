@@ -326,7 +326,7 @@ def generate_intervals(
     end   = jend.togregorian()
 
     if start > end:
-        raise ValueError("Start date must be before end date")
+        raise RequestDoesNotExistError("Start date must be before end date")
 
     # Devide littelest interval
     step = timedelta(0)
