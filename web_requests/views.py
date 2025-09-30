@@ -47,6 +47,7 @@ from .serializers_5 import (FactorsList, EntriesExtraction_5)
 from .serializers import DynamicRequestSerializer, LoginSerializer
 from .models import RequestLog, Requests, WebTokens, RequestsForeign
 from common.models import User, Companies
+from common.exceptions import RequestDoesNotExistError
 from scheduler.tasks import open_browser
 from .utils import (
     handle_request, generate_intervals, extract_filename, sanitize_filename, fallback_extract, remove_all_extensions,
@@ -924,17 +925,20 @@ class ArchiveViewSet(viewsets.ViewSet):
             'loginExpire': loginExpire_5
         }
         headers_h = {
-            "Origin": "https://samane.hamkadeh.com",
-            "Referer": "https://samane.hamkadeh.com/",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-            "Accept": "application/json, text/plain, */*",
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Cookie": f"token={token_h}; io={io_h}"
+            # "accept": "application/json, text/plain, */*",
+            # "origin": "https://samane.hamkadeh.com",
+            # "referer": "https://samane.hamkadeh.com/",
+            # "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            # "content-type": "application/x-www-form-urlencoded",
+            "cookie": f"io={io_h}; token={token_h}"
         }
 
         #############################
         # Preparing download and gadering tasks
-        completed_tasks, failed_tasks = extraction(request, headers_h, headers_5, gregorian_now)
+        try:
+            completed_tasks, failed_tasks = extraction(request, headers_h, headers_5, gregorian_now)
+        except RequestDoesNotExistError as e:
+            return Response(str(e), status=405)
 
 
         #############################
@@ -944,18 +948,24 @@ class ArchiveViewSet(viewsets.ViewSet):
 
         for task in completed_tasks:
 
-            result, start_date, end_date, specific_dir, company, name, idn = task.result()
+            result, start_date, end_date, specific_dir, company, name, idn, esp_opt = task.result()
 
             shared_dir = os.path.join(base_shared_dir, specific_dir)
             os.makedirs(shared_dir, exist_ok=True)
 
             filename, ext = get_filename_and_extension_from_response(result)
-            
 
-            start_date = datetime.datetime.strptime(start_date, '%Y/%m/%d %H:%M:%S')
+            # Check if esp_opt is not None and contains the 'datesep' key
+            if esp_opt != "" and 'datesep' in esp_opt and esp_opt['datesep'] != "":
+                date_separator = esp_opt['datesep']
+            else:
+                date_separator = '/'
+
+
+            start_date = datetime.datetime.strptime(start_date, f'%Y{date_separator}%m{date_separator}%d %H:%M:%S')
             start_date = jdatetime.datetime.fromgregorian(date=start_date).strftime('%Y_%m_%d_%H_%M_%S')
 
-            end_date = datetime.datetime.strptime(end_date, '%Y/%m/%d %H:%M:%S')                
+            end_date = datetime.datetime.strptime(end_date, f'%Y{date_separator}%m{date_separator}%d %H:%M:%S')                
             end_date = jdatetime.datetime.fromgregorian(date=end_date).strftime('%Y_%m_%d_%H_%M_%S')
 
             file_suffix = f"{start_date}__{end_date}"

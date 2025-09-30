@@ -39,7 +39,6 @@ def _h_call_log_index_request_params(serializer, gregorian_now):
     return params, 'start_call_from', 'start_call_to'
 
 
-
 def _5_factors_list_request_params(serializer, gregorian_now):
     date_gregorian = gregorian_now.date()
     flag_CallDate = (date_gregorian - timedelta(days=1)).strftime('%Y-%m-%d')
@@ -71,8 +70,44 @@ def _5_factors_list_request_params(serializer, gregorian_now):
     if 'payStatus' in serializer.validated_data:
         params['payStatus'] = serializer.validated_data.get('payStatus', "")
 
-
     return params, start_dt_prm_name, end_dt_prm_name
+
+def _5_v1_factor_extraction_params(serializer, gregorian_now):
+    date_gregorian = gregorian_now.date()
+    flag_CallDate = (date_gregorian - timedelta(days=1)).strftime('%Y-%m-%d')
+
+    start_dt_prm_name = ""
+    end_dt_prm_name = ""
+
+    params = {
+        'report': serializer.validated_data.get('report', 1),
+        'filter': serializer.validated_data.get('filter', 1),
+    }
+
+    if 'startInvoiceDate' in serializer.validated_data:
+        start_dt_prm_name = 'startInvoiceDate'
+        params['startInvoiceDate'] = serializer.validated_data.get('startInvoiceDate', f"{flag_CallDate} 00:00:00")
+    if 'endInvoiceDate' in serializer.validated_data:
+        end_dt_prm_name = 'endInvoiceDate'
+        params['endInvoiceDate'] = serializer.validated_data.get('endInvoiceDate', f"{flag_CallDate} 23:59:59")
+
+    if 'startPayAcceptDate' in serializer.validated_data:
+        if not start_dt_prm_name:
+            start_dt_prm_name = 'startPayAcceptDate'
+        params['startPayAcceptDate'] = serializer.validated_data.get('startPayAcceptDate', f"{flag_CallDate} 00:00:00")
+    if 'endPayAcceptDate' in serializer.validated_data:
+        if not end_dt_prm_name:
+            end_dt_prm_name = 'endPayAcceptDate'
+        params['endPayAcceptDate'] = serializer.validated_data.get('endPayAcceptDate', f"{flag_CallDate} 23:59:59")
+
+    if 'payStatus' in serializer.validated_data:
+        params['payStatus'] = serializer.validated_data.get('payStatus', "")
+
+    esp_opt = {
+        'datesep': '-'
+    }
+
+    return params, start_dt_prm_name, end_dt_prm_name, esp_opt
 
 def _5_v1_extraction(serializer, gregorian_now):
     date_gregorian = gregorian_now.date()
@@ -223,4 +258,14 @@ def _h_entryـextractـnumbersـnew(serializer, gregorian_now):
     if 'type' in serializer.validated_data:
         params['type'] = serializer.validated_data.get('type', "")
 
-    return params, 'entry_date_start', 'entry_date_end'
+    esp_opt = {
+        'datesep': '-'
+    }
+
+    """
+    Legend:
+    esp_opt: especific options
+    datesep: date seperator
+    """
+
+    return params, 'entry_date_start', 'entry_date_end', esp_opt

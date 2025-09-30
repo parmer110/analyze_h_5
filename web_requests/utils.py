@@ -25,11 +25,12 @@ from dateutil.relativedelta import relativedelta
 import pandas as pd
 from io import BytesIO
 from datetime import timedelta
-from typing import List, Dict
+from typing import Optional, Any, List, Dict, Tuple
 from email.parser import HeaderParser
 from itertools import islice
 from urllib.parse import unquote
 from common.locks import redlock_instance
+from common.exceptions import RequestDoesNotExistError
 
 from common.models import User, Companies
 from .models import RequestsForeign, WebTokens
@@ -40,6 +41,7 @@ from .request_params import (
     _5_call_logs_list_request_params,
     _h_call_log_index_request_params,
     _5_factors_list_request_params,
+    _5_v1_factor_extraction_params,
     _h_factor_index_request_params,
     _h_accounting_call_log_index,
     _h_reservation_index,
@@ -145,7 +147,13 @@ def debug_request(method, url, **kwargs):
     
     return resp
 
-def handle_request(method, url, headers, data, start_date, end_date, shared_dir, company, name, idn):
+def handle_request(method, url, headers, data, start_date, end_date, shared_dir, company, name, idn, esp_opt):
+
+    # if company == "hamkadeh":
+    #     headers = headers_h
+    # elif company == "5040":
+    #     headers = headers_5
+
     response = None
     counter = 0
     if method == 'GET':
@@ -157,7 +165,8 @@ def handle_request(method, url, headers, data, start_date, end_date, shared_dir,
             try:
                 print(f'→ count: {counter}, url: {url}, start date: {start_date}, end date: {end_date}←')
                 response = requests.get(url, headers=headers, params=data, timeout=1200)
-                print(response)
+                # rsp = debug_request("POST", url, headers=headers, json=data)
+                # print(response)
             except requests.exceptions.ConnectionError:
                 print("requests.exceptions.ConnectionError")
                 response = None
@@ -196,36 +205,30 @@ def handle_request(method, url, headers, data, start_date, end_date, shared_dir,
                 # Debug
                 print(f'◄count: {counter}, url: {url}, start date: {start_date}, end date: {end_date}►')
                 response = requests.post(url, headers=headers, json=data, timeout=1200)
+
+                # Debug
                 # url = "https://api.hamkadeh.com/api/entry/extract-numbers-new"
 
                 # headers = {
-                #     "accept": "application/json, text/plain, */*",
-                #     "origin": "https://samane.hamkadeh.com",
-                #     "referer": "https://samane.hamkadeh.com/",
-                #     "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                #     "content-type": "application/json",
+                #     # "accept": "application/json, text/plain, */*",
+                #     # "origin": "https://samane.hamkadeh.com",
+                #     # "referer": "https://samane.hamkadeh.com/",
+                #     # "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                #     # "content-type": "application/json",
                 #     "cookie": "io=XJcvBhQYLYfkYwbRCXZh; token=78002%7CBwoiTi48KzoxEH0IGBf7Y2xOntmLhTANdRVhiledda1b5da9",
                 # }
 
                 # data = {
                 #     "product_id": 3,
                 #     "reference": ["landing", "sms"],
-                #     "entry_date_start": "2025-08-30 00:00:00",
-                #     "entry_date_end": "2025-08-30 23:59:59",
+                #     "entry_date_start": "2025-09-13 00:00:00",
+                #     "entry_date_end": "2025-09-13 23:59:59",
                 # }
+                # rsp = debug_request("POST", url, headers=headers, json=data)
                 # response = requests.post(url, headers=headers, json=data, timeout=1200)
-                # Debug
-                # response = debug_request("POST", url, headers=headers, json=data)
                 # print("stat☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼")
-                # print(response.status_code)
-                # print(response.json())
-                # print("↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑")
-
-                # req = requests.Request("POST", url, headers=headers, data=data)
-                
-                # prepared = req.prepare()
-                # print("req☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼☼")
-                # print(curlify.to_curl(prepared))
+                # print(rsp.status_code)
+                # print(rsp.json())
                 # print("↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑")
 
             except requests.exceptions.ConnectionError:
@@ -257,26 +260,28 @@ def handle_request(method, url, headers, data, start_date, end_date, shared_dir,
     counter = 0
 
     # print(f"request to {response.url} Header is {headers} with status code {response.status_code}.")
-    return response, start_date, end_date, shared_dir, company, name, idn
+    return response, start_date, end_date, shared_dir, company, name, idn, esp_opt
 
 
 def parse_jalali_datetime(
     date_str: str,
     format_with_sec: str,
-    format_without_sec: str
-) -> jdatetime.datetime:
+    format_without_sec: str,
+) -> Tuple[jdatetime.datetime, str]:
     """Parse a Jalali date string, filling missing seconds if needed."""
     try:
-        return jdatetime.datetime.strptime(date_str, format_with_sec)
+        parsed = jdatetime.datetime.strptime(date_str, format_with_sec)
+        return parsed, 'with_sec'
     except ValueError:
         parsed = jdatetime.datetime.strptime(date_str, format_without_sec)
-        return parsed.replace(second=0)
+        return parsed.replace(second=0), 'without_sec'
 
 
 def generate_intervals(
     start_str: str,
     end_str: str,
-    idn: Dict[str, int]
+    idn: Dict[str, int],
+    esp_opt: Optional[Dict[str, Any]] = None
 ) -> List[Dict[str, str]]:
     """
     Generate time-based intervals according to integration_days_num (idn).
@@ -285,16 +290,38 @@ def generate_intervals(
     - idn: {'year':0, 'month':0, 'day':0, 'hour':h, 'minute':m, 'second':s}
     - Returns: [{'start_date': 'YYYY/MM/DD HH:MM:SS', 'end_date': 'YYYY/MM/DD HH:MM:SS'}, ...]
     """
-    primary_fmt = '%Y/%m/%d %H:%M:%S'
-    fallback_fmt = '%Y/%m/%d %H:%M'
+
+    # Check if esp_opt is not None and contains the 'datesep' key
+    if esp_opt is not None and 'datesep' in esp_opt and esp_opt['datesep'] != "":
+        date_separator = esp_opt['datesep']
+    else:
+        date_separator = '/'
+
+    primary_init_fmt = '%Y/%m/%d %H:%M:%S'
+    primary_fmt = f'%Y{date_separator}%m{date_separator}%d %H:%M:%S'
+    fallback_init_fmt = '%Y/%m/%d %H:%M'
+    fallback_fmt = f'%Y{date_separator}%m{date_separator}%d %H:%M'
 
     # Default idn to 1 day if not provided
     if idn is None:
         idn = {'year': 0, 'month': 0, 'day': 1, 'hour': 0, 'minute': 0, 'second': 0}
 
     # convert Jalali to Gregorian datetime
-    jstart = parse_jalali_datetime(start_str, primary_fmt, fallback_fmt)
-    jend   = parse_jalali_datetime(end_str,   primary_fmt, fallback_fmt)
+    jstart, start_format_used = parse_jalali_datetime(start_str, primary_init_fmt, fallback_init_fmt)
+    jend, end_format_used   = parse_jalali_datetime(end_str,   primary_init_fmt, fallback_init_fmt)
+
+    # Determine the appropriate format for jstart
+    if start_format_used == 'with_sec':
+        start_format = primary_fmt
+    else:
+        start_format = fallback_fmt
+
+    # Determine the appropriate format for jend
+    if end_format_used == 'with_sec':
+        end_format = primary_fmt
+    else:
+        end_format = fallback_fmt
+
     start = jstart.togregorian()
     end   = jend.togregorian()
 
@@ -302,13 +329,14 @@ def generate_intervals(
         raise ValueError("Start date must be before end date")
 
     # Devide littelest interval
+    step = timedelta(0)
     if idn.get("second", 0) > 0:
         step = timedelta(seconds=idn["second"])
-    elif idn.get("minute", 0) > 0:
-        step = timedelta(minutes=idn["minute"])
-    elif idn.get("hour", 0) > 0:
-        step = timedelta(hours=idn["hour"])
-    else:
+    if idn.get("minute", 0) > 0:
+        step += timedelta(minutes=idn["minute"])
+    if idn.get("hour", 0) > 0:
+        step += timedelta(hours=idn["hour"])
+    if step is None or step == timedelta(0):
         # Dayly defalut
         step = timedelta(days=1)
 
@@ -322,8 +350,8 @@ def generate_intervals(
             current_end = end
 
         intervals.append({
-            'start_date': current_start.strftime(primary_fmt),
-            'end_date':   current_end.strftime(primary_fmt),
+            'start_date': current_start.strftime(start_format),
+            'end_date':   current_end.strftime(end_format),
         })
 
         # Devide indifinite loop
@@ -430,6 +458,8 @@ def get_filename_and_extension_from_response(response):
 
 
 def extraction(request, headers_h, headers_5, gregorian_now):
+
+    username = request.query_params.get('username')
     # Functions requesting web_app
     # Will made automization
     request_handler_map = {
@@ -440,6 +470,7 @@ def extraction(request, headers_h, headers_5, gregorian_now):
         ('hamkadeh', 'call-log/index'): _h_call_log_index_request_params,
 
         ('5040', 'factors/list'): _5_factors_list_request_params,
+        ('5040', 'v1/factor-extraction'): _5_v1_factor_extraction_params,
         ('hamkadeh', 'factor/index'): _h_factor_index_request_params,
 
         ('hamkadeh', 'accounting/call-log/index'): _h_accounting_call_log_index,
@@ -469,12 +500,12 @@ def extraction(request, headers_h, headers_5, gregorian_now):
         try:
             company_inst = Companies.objects.get(name=company)
         except RequestsForeign.DoesNotExist:
-            return Response(f'The Company: {company} does not exist!' , status=405)
-
+            raise RequestDoesNotExistError(f'The Company: {company} does not exist!' , status=405)
+        
         try:
             request_instance = RequestsForeign.objects.get(company=company_inst, name=name)
         except RequestsForeign.DoesNotExist:
-            return Response(f'The {name} does not exist for {company} company defined requests!' , status=405)
+            raise RequestDoesNotExistError(f'The {name} does not exist for {company} company defined requests!')
         
         # Dynamic serializer
         serializer = DynamicRequestSerializer(data={**body_parameters, **query_parameters}, request_foreign=request_instance)
@@ -483,10 +514,14 @@ def extraction(request, headers_h, headers_5, gregorian_now):
             raise ValidationError(
                 {f'Company "{company}", Request "{name}" serializer error!': serializer.errors}
             )
-        
+
         company_name_pair = (company, name)
         if company_name_pair in request_handler_map:
-            parameters, start_date_name, end_date_name  = request_handler_map[company_name_pair](serializer, gregorian_now)
+            request_params_func = request_handler_map[company_name_pair](serializer, gregorian_now)
+            if len(request_params_func) == 3:
+                parameters, start_date_name, end_date_name = request_params_func
+            elif len(request_params_func) == 4:
+                parameters, start_date_name, end_date_name, esp_opt = request_params_func
         else:
             return Response(f"No requesting function defined for company: {company}, name: {name}", status=400)
 
@@ -501,7 +536,10 @@ def extraction(request, headers_h, headers_5, gregorian_now):
         end_date = parameters[end_date_name].strftime('%Y/%m/%d %H:%M:%S')
         
         # separate date rage each day individual considering first starting and lans ending hours
-        dates = generate_intervals(start_date, end_date, idn)
+        if len(request_params_func) == 3:
+            dates = generate_intervals(start_date, end_date, idn)
+        elif len(request_params_func) == 4:
+            dates = generate_intervals(start_date, end_date, idn, esp_opt)
 
         method, url, headers, params = task
         for interval in dates:
@@ -511,24 +549,35 @@ def extraction(request, headers_h, headers_5, gregorian_now):
             new_params[end_date_name] = interval['end_date']
 
             expanded_tasks.append((
-                method, url, headers, new_params, interval['start_date'], interval['end_date'], specific_dir, company, name, idn
+                method, url, headers, new_params, interval['start_date'], interval['end_date'],
+                specific_dir, company, name, idn, esp_opt if 'esp_opt' in locals() else ""
             ))
-    
-    #############################
+
     # Preparing requested data download
-    max_retries = 5
+    max_retries = 3
     retry_count = 0
     completed_tasks = []
     while expanded_tasks and retry_count < max_retries:
-        # Refreshing targets
-        
 
         delay = random.randint(1 * 60, 10 * 60)  # seconds
         retry_count += 1
-
+        
+        # Printing company listed in tasks.
+        # for idx, task in enumerate(expanded_tasks, start=1):
+        #     print(f'☼ → {idx}. company: {task[7]}')
+        
         if retry_count > 1:
             print(f"☻♣Sleeping for {delay} seconds")
             time.sleep(delay)
+
+            # Refreshing targets
+            if any(task[7] == "5040" for task in expanded_tasks):
+                cookies_5 = refresh_5040(username)
+                if not cookies_5:
+                    logger.error("♪5040 panel refreshing issued while request tasks pool before executation ♪")
+                    continue
+                else:
+                    print("♪5040 panel refreshing while encountered 5040 task.♪ Performs refreshed...")
 
         print(f"--- Try #{retry_count} for {len(expanded_tasks)} tasks ---")
         failed_tasks = []
@@ -552,7 +601,7 @@ def extraction(request, headers_h, headers_5, gregorian_now):
                 task = future_to_task[future]
 
                 try:
-                    result, start_date, end_date, specific_dir, company, name, idn = future.result()
+                    result, start_date, end_date, specific_dir, company, name, idn, esp_opt = future.result()
                 except Exception as exc:
                     failed_tasks.append(task)
                     continue
@@ -585,10 +634,10 @@ class MergedTask:
     Mimics a Future whose .result() returns:
       (response_obj, start_str, end_str, shared_dir, company, name, idn)
     """
-    def __init__(self, content_bytes, start_str, end_str, shared_dir, company, name, idn, ext):
+    def __init__(self, content_bytes, start_str, end_str, shared_dir, company, name, idn, ext, esp_opt):
         self._response = DummyResponse(content_bytes, ext)
         # ext is embedded in headers; do not include in meta unpack
-        self._meta = (start_str, end_str, shared_dir, company, name, idn)
+        self._meta = (start_str, end_str, shared_dir, company, name, idn, esp_opt)
 
     def result(self):
         return (self._response, *self._meta)
@@ -607,15 +656,22 @@ def merge_completed_tasks(completed_tasks):
     """
     raw = []
     for fut in completed_tasks:
-        resp, s_jstr, e_jstr, shared_dir, company, name, idn = fut.result()
-        s_dt = datetime.datetime.strptime(s_jstr, '%Y/%m/%d %H:%M:%S')
-        e_dt = datetime.datetime.strptime(e_jstr, '%Y/%m/%d %H:%M:%S')
+        resp, s_jstr, e_jstr, shared_dir, company, name, idn, esp_opt = fut.result()
+
+        # Check if esp_opt is not None and contains the 'datesep' key
+        if esp_opt != "" and 'datesep' in esp_opt and esp_opt['datesep'] != "":
+            date_separator = esp_opt['datesep']
+        else:
+            date_separator = '/'
+
+        s_dt = datetime.datetime.strptime(s_jstr, f'%Y{date_separator}%m{date_separator}%d %H:%M:%S')
+        e_dt = datetime.datetime.strptime(e_jstr, f'%Y{date_separator}%m{date_separator}%d %H:%M:%S')
         cd = getattr(resp, 'headers', {}).get('Content-Disposition', '')
         ext = 'csv' if '.csv' in cd.lower() else 'xlsx'
         raw.append({'resp': resp, 's_dt': s_dt, 'e_dt': e_dt,
                     's_jstr': s_jstr, 'e_jstr': e_jstr,
                     'shared_dir': shared_dir, 'company': company,
-                    'name': name, 'idn': idn, 'ext': ext})
+                    'name': name, 'idn': idn, 'ext': ext, 'esp_opt': esp_opt})
 
     groups = defaultdict(list)
     for item in raw:
@@ -638,17 +694,18 @@ def merge_completed_tasks(completed_tasks):
                 merged_tasks.append(MergedTask(it['resp'].content,
                                                it['s_jstr'], it['e_jstr'],
                                                it['shared_dir'], it['company'],
-                                               it['name'], it['idn'], it['ext']))
+                                               it['name'], it['idn'], it['ext'], it['esp_opt']))
             continue
 
         current_df = None
+        cur_esp_opt = None
         cur_start_dt = None
         cur_end_dt = None
         cur_meta = None
         group_ext = items[0]['ext']
 
         def flush_batch():
-            nonlocal current_df, cur_start_dt, cur_end_dt, cur_meta, group_ext
+            nonlocal current_df, cur_esp_opt, cur_start_dt, cur_end_dt, cur_meta, group_ext
             if current_df is None:
                 return
             with BytesIO() as buf:
@@ -657,11 +714,13 @@ def merge_completed_tasks(completed_tasks):
                 else:
                     current_df.to_excel(buf, index=False, engine='openpyxl')
                 data = buf.getvalue()
-            s_j = jdatetime.datetime.fromgregorian(datetime=cur_start_dt).strftime('%Y/%m/%d %H:%M:%S')
-            e_j = jdatetime.datetime.fromgregorian(datetime=cur_end_dt).strftime('%Y/%m/%d %H:%M:%S')
+                
+            
+            s_j = jdatetime.datetime.fromgregorian(datetime=cur_start_dt).strftime(f'%Y{date_separator}%m{date_separator}%d %H:%M:%S')
+            e_j = jdatetime.datetime.fromgregorian(datetime=cur_end_dt).strftime(f'%Y{date_separator}%m{date_separator}%d %H:%M:%S')
             merged_tasks.append(MergedTask(data, s_j, e_j,
                                            cur_meta['shared_dir'], cur_meta['company'],
-                                           cur_meta['name'], cur_meta['idn'], group_ext))
+                                           cur_meta['name'], cur_meta['idn'], cur_meta['esp_opt'], group_ext))
             current_df = None
 
         for it in items:
@@ -672,18 +731,21 @@ def merge_completed_tasks(completed_tasks):
                 continue
             if current_df is None:
                 current_df = df
+                cur_esp_opt = it['esp_opt']
                 cur_start_dt = it['s_dt']
                 cur_end_dt = it['e_dt']
                 cur_meta = it
             elif it['s_dt'] > (cur_start_dt + datetime.timedelta(seconds=secs)):
                 flush_batch()
                 current_df = df
+                cur_esp_opt = it['esp_opt']
                 cur_start_dt = it['s_dt']
                 cur_end_dt = it['e_dt']
                 cur_meta = it
             elif len(current_df) + len(df) > EXCEL_MAX_ROWS:
                 flush_batch()
                 current_df = df
+                cur_esp_opt = it['esp_opt']
                 cur_start_dt = it['s_dt']
                 cur_end_dt = it['e_dt']
                 cur_meta = it
@@ -872,3 +934,5 @@ def refresh_5040(username):
         if key:
             refresh_kwargs[key] = c['value']
             WebTokens.objects.filter(user=user, name=key).update(value=c['value'])
+
+    return cookies

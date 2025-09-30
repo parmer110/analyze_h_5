@@ -48,80 +48,8 @@ Content-Type: application/json
 [
 {
 	"company": "5040",
-	"name": "call/logs/list",
-	"directory_helper": "",
-	"body": {},
-	"query": {
-		"report": 1,
-		"filter": 1,
-		"startCallDate": "1404/06/11 00:00:00",
-		"endCallDate": "1404/06/11 23:59:59"
-	}
-},
-{
-	"company": "Hamkadeh",
-	"name": "call-log/index",
-	"directory_helper": "",
-	"body": {},
-	"query": {
-		"export_data": 1,
-		"start_call_from": "1404/06/11 00:00:00",
-		"start_call_to": "1404/06/11 23:59:59"
-	}
-},
-{
-	"company": "Hamkadeh",
-	"name": "factor/index",
+	"name": "v1/factor-extraction",
 	"directory_helper": "ثبت",
-	"body": {},
-	"query": {
-		"export_data": 1,
-		"start_created_at": "1404/06/11 00:00:00",
-		"end_created_at": "1404/06/11 23:59:59"
-	}
-},
-{
-	"company": "Hamkadeh",
-	"name": "factor/index",
-	"directory_helper": "وصول",
-	"body": {},
-	"query": {
-		"export_data": 1,
-		"start_accept_action_date": "1404/06/11 00:00:00",
-		"end_accept_action_date": "1404/06/11 23:59:59",
-		"receipt_status": "accepted ",
-		"status": "PAID"
-	}
-},
-{
-	"company": "5040",
-	"name": "factors/list",
-	"directory_helper": "ثبت",
-	"body": {},
-	"query": {
-		"report": 1,
-		"filter": 1,
-		"startInvoiceDate": "1404/06/11 00:00:00",
-		"endInvoiceDate": "1404/06/11 23:59:59"
-	}
-},
-{
-	"company": "5040",
-	"name": "factors/list",
-	"directory_helper": "وصول",
-	"body": {},
-	"query": {
-		"report": 1,
-		"filter": 1,
-		"startPayAcceptDate": "1404/06/11 00:00:00",
-		"endPayAcceptDate": "1404/06/11 23:59:59",
-		"payStatus": "paid"
-	}
-},
-{
-	"company": "5040",
-	"name": "v1/extraction",
-	"directory_helper": "",
 	"integration_days_num": {
 		"year": 0,
 		"month": 0,
@@ -130,13 +58,13 @@ Content-Type: application/json
 		"minute": 0,
 		"second": 0
 	},        
-	"body": {
-		"containDeletedEntries": true,
-		"startEntryDate": "1404/06/11 00:00:00",
-		"endEntryDate": "1404/06/11 23:59:59",
-		"references": ["Landing", "sms"]
-	},
-	"query": {}
+	"body": {},
+	"query": {
+		"report": 1,
+		"filter": 1,
+		"startInvoiceDate": "1404/07/07 00:00:00",
+		"endInvoiceDate": "1404/07/07 23:59:59"
+	}
 }
 ]
 
